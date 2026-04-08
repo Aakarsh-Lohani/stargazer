@@ -5,6 +5,7 @@ Uses OpenWeatherMap free tier — works for USA and India.
 import os
 import requests
 import logging
+from typing import Optional
 from datetime import datetime, timezone
 from google.adk.tools.tool_context import ToolContext
 
@@ -52,8 +53,8 @@ CLOUD_THRESHOLDS = {
 def check_weather_for_observation(
     tool_context: ToolContext,
     city_name: str = "",
-    latitude: float = None,
-    longitude: float = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
     observation_time_utc: str = ""
 ) -> dict:
     """

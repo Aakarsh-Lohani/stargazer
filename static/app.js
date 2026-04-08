@@ -1,6 +1,6 @@
 /**
  * StarGazer — Frontend Application
- * Handles chat interaction, dashboard updates, and UI state management.
+ * Streaming agent pipeline, persistent Insights panel, BQ log retrieval.
  */
 
 // ─── State ──────────────────────────────────────────────────────────
@@ -8,9 +8,11 @@ const state = {
     sessionId: null,
     isLoading: false,
     activePanel: 'chat',
+    insightsVisible: true,
+    currentTraceSession: null,
 };
 
-// ─── DOM Elements ───────────────────────────────────────────────────
+// ─── DOM ─────────────────────────────────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -24,56 +26,46 @@ const newSessionBtn = $('#newSessionBtn');
 const clearChatBtn = $('#clearChatBtn');
 const mobileMenuBtn = $('#mobileMenuBtn');
 const sidebar = $('#sidebar');
+const insightsPanel = $('#insightsPanel');
+const traceContent = $('#traceContent');
+const bqContent = $('#bqContent');
+const traceEmpty = $('#traceEmpty');
+const bqEmpty = $('#bqEmpty');
 
 
-// ─── Initialize ─────────────────────────────────────────────────────
+// ─── Initialize ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     initStars();
     initNavigation();
     initChat();
     initDashboard();
+    initInsightsPanel();
     setWelcomeTime();
     initSession();
 });
 
 
-// ─── Stars Background ──────────────────────────────────────────────
+// ─── Stars Background ────────────────────────────────────────────────
 function initStars() {
     const container = $('#starsContainer');
     if (!container) return;
-
-    const starCount = 180;
     const fragment = document.createDocumentFragment();
-
-    for (let i = 0; i < starCount; i++) {
+    for (let i = 0; i < 180; i++) {
         const star = document.createElement('div');
         star.className = 'star';
-
         const size = Math.random() * 2.5 + 0.5;
-        const x = Math.random() * 100;
-        const y = Math.random() * 100;
-        const duration = Math.random() * 4 + 2;
-        const delay = Math.random() * 4;
-        const minOpacity = Math.random() * 0.3 + 0.1;
-
         star.style.cssText = `
-            width: ${size}px;
-            height: ${size}px;
-            left: ${x}%;
-            top: ${y}%;
-            --duration: ${duration}s;
-            --delay: ${delay}s;
-            --min-opacity: ${minOpacity};
-        `;
-
+            width:${size}px;height:${size}px;
+            left:${Math.random()*100}%;top:${Math.random()*100}%;
+            --duration:${Math.random()*4+2}s;--delay:${Math.random()*4}s;
+            --min-opacity:${Math.random()*0.3+0.1};`;
         fragment.appendChild(star);
     }
-
     container.appendChild(fragment);
 }
 
 
-// ─── Navigation ─────────────────────────────────────────────────────
+// ─── Navigation ───────────────────────────────────────────────────────
 function initNavigation() {
     const navBtns = $$('.nav-btn');
     const panels = $$('.panel');
@@ -81,42 +73,28 @@ function initNavigation() {
     navBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const panelId = btn.dataset.panel;
-
             navBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-
             panels.forEach(p => p.classList.remove('active'));
             $(`#${panelId}Panel`).classList.add('active');
-
             state.activePanel = panelId;
-
-            // Close mobile sidebar
-            if (window.innerWidth <= 768) {
-                sidebar.classList.remove('open');
-            }
+            if (window.innerWidth <= 768) sidebar.classList.remove('open');
         });
     });
 
-    // Mobile menu
     if (mobileMenuBtn) {
-        mobileMenuBtn.addEventListener('click', () => {
-            sidebar.classList.toggle('open');
-        });
+        mobileMenuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
     }
-
-    // Close sidebar on outside click (mobile)
     document.addEventListener('click', (e) => {
-        if (window.innerWidth <= 768 &&
-            sidebar.classList.contains('open') &&
-            !sidebar.contains(e.target) &&
-            !mobileMenuBtn.contains(e.target)) {
+        if (window.innerWidth <= 768 && sidebar.classList.contains('open') &&
+            !sidebar.contains(e.target) && !mobileMenuBtn.contains(e.target)) {
             sidebar.classList.remove('open');
         }
     });
 }
 
 
-// ─── Session Management ─────────────────────────────────────────────
+// ─── Session Management ──────────────────────────────────────────────
 async function initSession() {
     try {
         const resp = await fetch('/api/session/new', { method: 'POST' });
@@ -130,24 +108,145 @@ async function initSession() {
 }
 
 
-// ─── Chat ───────────────────────────────────────────────────────────
+// ─── Insights Panel ──────────────────────────────────────────────────
+function initInsightsPanel() {
+    // Tab switching
+    $$('.insights-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('.insights-tab').forEach(t => t.classList.remove('active'));
+            $$('.insights-tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            $(`#${tab.dataset.tab}Tab`).classList.add('active');
+
+            // Load BQ log when switching to that tab
+            if (tab.dataset.tab === 'bqlog') loadBQLog();
+        });
+    });
+
+    // Toggle button in panel header
+    const collapseBtn = $('#collapseInsightsBtn');
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', () => {
+            insightsPanel.classList.add('collapsed');
+            state.insightsVisible = false;
+        });
+    }
+
+    // Toggle from panel header button
+    const toggleBtn = $('#toggleInsightsBtn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            state.insightsVisible = !state.insightsVisible;
+            insightsPanel.classList.toggle('collapsed', !state.insightsVisible);
+        });
+    }
+}
+
+// Start a new trace block in the Insights panel for this turn
+function startTraceSession(userMessage) {
+    if (traceEmpty) traceEmpty.style.display = 'none';
+
+    const block = document.createElement('div');
+    block.className = 'trace-session';
+    block.id = `trace-${Date.now()}`;
+
+    const header = document.createElement('div');
+    header.className = 'trace-session-header';
+    header.innerHTML = `
+        <span>💬 ${escapeHtml(userMessage.slice(0, 60))}${userMessage.length > 60 ? '…' : ''}</span>
+        <span>${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+    `;
+    block.appendChild(header);
+
+    traceContent.appendChild(block);
+    state.currentTraceSession = block;
+
+    // Scroll insights to bottom
+    const body = $('.insights-body');
+    if (body) requestAnimationFrame(() => body.scrollTop = body.scrollHeight);
+
+    return block;
+}
+
+function appendTraceEntry(html) {
+    if (!state.currentTraceSession) return;
+    const entry = document.createElement('div');
+    entry.className = 'trace-entry';
+    entry.innerHTML = html;
+    state.currentTraceSession.appendChild(entry);
+
+    // Keep insights scrolled to bottom
+    const body = $('.insights-body');
+    if (body) requestAnimationFrame(() => body.scrollTop = body.scrollHeight);
+}
+
+function tsLabel() {
+    return `<span class="trace-timestamp">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>`;
+}
+
+
+// ─── BQ Log Loading ──────────────────────────────────────────────────
+async function loadBQLog() {
+    if (bqEmpty) bqEmpty.style.display = 'none';
+    bqContent.innerHTML = '<div style="color:#475569;padding:8px;font-size:0.72rem;">Loading from BigQuery...</div>';
+
+    try {
+        const url = state.sessionId
+            ? `/api/pipeline-log?session_id=${state.sessionId}&limit=50`
+            : `/api/pipeline-log?limit=50`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (!data.logs || data.logs.length === 0) {
+            bqContent.innerHTML = '';
+            if (bqEmpty) bqEmpty.style.display = 'block';
+            return;
+        }
+
+        bqContent.innerHTML = '';
+        data.logs.forEach(log => {
+            const entry = document.createElement('div');
+            entry.className = 'bq-entry';
+            const icon = {
+                agent_switch: '🤖', tool_call: '🔧', tool_result: '✅',
+                thinking: '💭', final: '🏁', error: '❌'
+            }[log.event_type] || '•';
+            const typeColor = {
+                agent_switch: '#a78bfa', tool_call: '#60a5fa',
+                tool_result: '#34d399', thinking: '#64748b', final: '#fbbf24'
+            }[log.event_type] || '#94a3b8';
+
+            let detail = '';
+            if (log.tool_name) detail += ` <span style="color:#94a3b8">${log.tool_name}</span>`;
+            if (log.agent_name) detail += ` <span style="color:#475569">via ${log.agent_name}</span>`;
+            if (log.tool_result_preview) detail += `<div style="color:#475569;font-size:0.65rem;margin-top:2px">${escapeHtml(log.tool_result_preview.slice(0,120))}${log.tool_result_preview.length>120?'…':''}</div>`;
+
+            entry.innerHTML = `
+                <div class="bq-entry-type">${icon} <span style="color:${typeColor}">${log.event_type?.toUpperCase()}</span></div>
+                <div class="bq-entry-info">${detail || escapeHtml((log.thinking_text||'').slice(0,100))}</div>
+                <div style="color:#1e293b;font-size:0.62rem;margin-top:2px">${log.created_at}</div>
+            `;
+            bqContent.appendChild(entry);
+        });
+    } catch (err) {
+        bqContent.innerHTML = `<div style="color:#f87171;padding:8px;font-size:0.72rem;">Error loading BQ log: ${err.message}</div>`;
+    }
+}
+
+
+// ─── Chat ────────────────────────────────────────────────────────────
 function initChat() {
-    // Form submit
     chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const message = chatInput.value.trim();
-        if (message && !state.isLoading) {
-            sendMessage(message);
-        }
+        if (message && !state.isLoading) sendMessage(message);
     });
 
-    // Auto-resize textarea
     chatInput.addEventListener('input', () => {
         chatInput.style.height = 'auto';
         chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
     });
 
-    // Enter to send (Shift+Enter for new line)
     chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -155,17 +254,12 @@ function initChat() {
         }
     });
 
-    // Quick prompts
     $$('.quick-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const prompt = btn.dataset.prompt;
-            if (prompt && !state.isLoading) {
-                sendMessage(prompt);
-            }
+            if (btn.dataset.prompt && !state.isLoading) sendMessage(btn.dataset.prompt);
         });
     });
 
-    // New session
     if (newSessionBtn) {
         newSessionBtn.addEventListener('click', async () => {
             if (state.isLoading) return;
@@ -174,77 +268,178 @@ function initChat() {
         });
     }
 
-    // Clear chat
     if (clearChatBtn) {
-        clearChatBtn.addEventListener('click', () => {
-            clearChat();
-        });
+        clearChatBtn.addEventListener('click', clearChat);
     }
 }
 
+
+// Agent icons
+const AGENT_ICONS = {
+    stargazer_greeter: '🌌',
+    orbital_agent: '🛰️',
+    weather_agent: '🌤️',
+    logistics_agent: '🗺️',
+    stargazer_workflow: '⚙️',
+};
+
+
+// ─── Send Message (Streaming) ─────────────────────────────────────────
 async function sendMessage(message) {
     if (state.isLoading) return;
     state.isLoading = true;
 
-    // Hide quick prompts after first message
-    if (quickPrompts) {
-        quickPrompts.style.display = 'none';
-    }
+    if (quickPrompts) quickPrompts.style.display = 'none';
 
-    // Add user message
     appendMessage('user', message);
     chatInput.value = '';
     chatInput.style.height = 'auto';
 
-    // Show typing indicator
-    const typingEl = showTypingIndicator();
+    // Start a trace block in the Insights panel
+    const traceBlock = startTraceSession(message);
+
+    // Show "thinking" in chat as a minimal status indicator
+    const thinkingEl = showThinkingBar();
+    setSendBtnLoading(true);
 
     try {
-        const resp = await fetch('/api/chat', {
+        const resp = await fetch('/api/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: message,
-                session_id: state.sessionId
-            })
+            body: JSON.stringify({ message, session_id: state.sessionId })
         });
 
-        const data = await resp.json();
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalResponse = null;
 
-        // Remove typing indicator
-        typingEl.remove();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        if (data.error) {
-            appendMessage('agent', `⚠️ Error: ${data.error}`);
-            updateAgentStatus('Error', 'error');
-        } else {
-            appendMessage('agent', data.response);
-            state.sessionId = data.session_id;
-            updateAgentStatus('Online', 'active');
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
 
-            // Parse response for status updates
-            parseResponseForDashboard(data.response);
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const raw = line.slice(6).trim();
+                if (raw === '[DONE]') break;
+
+                try {
+                    const evt = JSON.parse(raw);
+                    processStreamEvent(evt, thinkingEl);
+                    if (evt.type === 'session') state.sessionId = evt.session_id;
+                    if (evt.type === 'final') finalResponse = evt.text;
+                } catch (_) {}
+            }
         }
+
+        thinkingEl.remove();
+
+        if (finalResponse) {
+            appendMessage('agent', finalResponse);
+            parseResponseForDashboard(finalResponse);
+            // Mark trace as complete
+            appendTraceEntry(`${tsLabel()}<span style="color:#34d399;font-weight:600">✓ Final response delivered</span>`);
+        } else {
+            appendMessage('agent', '⚠️ No response received. The agent may still be initializing — try again.');
+        }
+        updateAgentStatus('Online', 'active');
+
     } catch (err) {
-        typingEl.remove();
-        appendMessage('agent', `⚠️ Connection error. Please check if the server is running.`);
+        thinkingEl.remove();
+        appendMessage('agent', '⚠️ Connection error. Please check if the server is running.');
+        appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">✗ Stream error: ${escapeHtml(err.message)}</span>`);
         updateAgentStatus('Offline', 'error');
-        console.error('Chat error:', err);
     }
 
+    setSendBtnLoading(false);
     state.isLoading = false;
 }
 
+
+// ─── Process Stream Event → Insights Panel ───────────────────────────
+function processStreamEvent(evt, thinkingEl) {
+    if (evt.type === 'agent_switch') {
+        const icon = AGENT_ICONS[evt.agent] || '🤖';
+        updateThinkingBar(thinkingEl, `${icon} ${evt.agent}`);
+        appendTraceEntry(`${tsLabel()}<span class="trace-agent">${icon} ${escapeHtml(evt.agent)}</span>`);
+    }
+
+    if (evt.type === 'tool_call') {
+        const argsFormatted = Object.entries(evt.args || {})
+            .filter(([, v]) => v !== '' && v !== null)
+            .map(([k, v]) => `<span style="color:#94a3b8">${k}</span>=<span style="color:#fbbf24">${escapeHtml(JSON.stringify(v))}</span>`)
+            .join(', ');
+        updateThinkingBar(thinkingEl, `🔧 ${evt.tool}`);
+        appendTraceEntry(`${tsLabel()}<span class="trace-tool">🔧 ${escapeHtml(evt.tool)}(${argsFormatted})</span> <span id="tc-${evt.tool}-spinner" style="color:#64748b">⏳</span>`);
+    }
+
+    if (evt.type === 'tool_result') {
+        // Update the spinner on the matching tool call entry
+        const entries = state.currentTraceSession?.querySelectorAll('.trace-entry') || [];
+        for (let i = entries.length - 1; i >= 0; i--) {
+            const spinner = entries[i].querySelector(`[id="tc-${evt.tool}-spinner"]`);
+            if (spinner) { spinner.textContent = '✓'; spinner.style.color = '#34d399'; break; }
+        }
+        if (evt.preview) {
+            const preview = evt.preview.slice(0, 120) + (evt.preview.length > 120 ? '…' : '');
+            appendTraceEntry(`${tsLabel()}<span class="trace-tool-ok">↳ ${escapeHtml(preview)}</span>`);
+        }
+    }
+
+    if (evt.type === 'thinking') {
+        const text = (evt.text || '').slice(0, 200);
+        appendTraceEntry(`${tsLabel()}<span class="trace-think">💭 ${escapeHtml(text)}${evt.text?.length > 200 ? '…' : ''}</span>`);
+    }
+}
+
+
+// ─── Thinking bar in chat (minimal, just a status line) ──────────────
+function showThinkingBar() {
+    const div = document.createElement('div');
+    div.className = 'message agent-message';
+    div.id = 'thinkingBar';
+    div.innerHTML = `
+        <div class="message-avatar">⚙️</div>
+        <div class="message-content">
+            <div class="message-header">
+                <span class="message-sender" id="thinkingLabel">Initializing agents...</span>
+                <span class="message-time">live</span>
+            </div>
+            <div class="message-body" style="opacity:0.5;font-size:0.82rem;">
+                <div class="typing-indicator" style="display:inline-flex;gap:4px;vertical-align:middle;">
+                    <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+                </div>
+                <span style="margin-left:8px;color:#64748b;font-size:0.75rem;">See Agent Insights panel → for details</span>
+            </div>
+        </div>`;
+    chatMessages.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
+function updateThinkingBar(el, text) {
+    const label = el.querySelector('#thinkingLabel');
+    if (label) label.textContent = text;
+}
+
+function setSendBtnLoading(loading) {
+    if (!sendBtn) return;
+    sendBtn.disabled = loading;
+    sendBtn.innerHTML = loading ? '⏳' : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"></path><path d="M22 2L15 22L11 13L2 9L22 2Z"></path></svg>`;
+}
+
+
+// ─── Message Rendering ────────────────────────────────────────────────
 function appendMessage(role, content) {
     const div = document.createElement('div');
     div.className = `message ${role === 'user' ? 'user-message' : 'agent-message'}`;
-
     const avatar = role === 'user' ? '👤' : '🔭';
     const sender = role === 'user' ? 'You' : 'StarGazer';
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Format content — basic markdown support
-    const formattedContent = formatContent(content);
 
     div.innerHTML = `
         <div class="message-avatar">${avatar}</div>
@@ -253,96 +448,47 @@ function appendMessage(role, content) {
                 <span class="message-sender">${sender}</span>
                 <span class="message-time">${time}</span>
             </div>
-            <div class="message-body">${formattedContent}</div>
-        </div>
-    `;
-
+            <div class="message-body">${formatContent(content)}</div>
+        </div>`;
     chatMessages.appendChild(div);
     scrollToBottom();
 }
 
 function formatContent(text) {
     if (!text) return '';
-
-    // Escape HTML
-    let html = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-
-    // Bold
+    let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-    // Italic
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-
-    // Inline code
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // Code blocks
     html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-
-    // GO/NO-GO badges
     html = html.replace(/\b(GO)\b(?![\-\w])/g, '<span class="go-status go">✅ GO</span>');
     html = html.replace(/\bNO-GO\b/g, '<span class="go-status nogo">❌ NO-GO</span>');
     html = html.replace(/\bMARGINAL\b/g, '<span class="go-status marginal">⚠️ MARGINAL</span>');
-
-    // Line breaks → paragraphs
-    html = html
-        .split('\n\n')
-        .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`)
-        .join('');
-
+    html = html.split('\n\n').map(p => `<p>${p.replace(/\n/g,'<br>')}</p>`).join('');
     return html;
 }
 
-function showTypingIndicator() {
-    const div = document.createElement('div');
-    div.className = 'message agent-message';
-    div.innerHTML = `
-        <div class="message-avatar">🔭</div>
-        <div class="message-content">
-            <div class="message-header">
-                <span class="message-sender">StarGazer</span>
-                <span class="message-time">thinking...</span>
-            </div>
-            <div class="message-body">
-                <div class="typing-indicator">
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                </div>
-            </div>
-        </div>
-    `;
-    chatMessages.appendChild(div);
-    scrollToBottom();
-    return div;
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function clearChat() {
-    // Keep only the welcome message
     const messages = chatMessages.querySelectorAll('.message:not(.welcome-message)');
     messages.forEach(m => m.remove());
     if (quickPrompts) quickPrompts.style.display = 'flex';
 }
 
 function scrollToBottom() {
-    requestAnimationFrame(() => {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    });
+    requestAnimationFrame(() => { chatContainer.scrollTop = chatContainer.scrollHeight; });
 }
 
 
-// ─── Dashboard ──────────────────────────────────────────────────────
+// ─── Dashboard ────────────────────────────────────────────────────────
 function initDashboard() {
     const refreshIss = $('#refreshIss');
-    if (refreshIss) {
-        refreshIss.addEventListener('click', fetchISSPosition);
-    }
-    // Fetch ISS on load
+    if (refreshIss) refreshIss.addEventListener('click', fetchISSPosition);
     fetchISSPosition();
-    // Auto-refresh ISS every 30 seconds
     setInterval(fetchISSPosition, 30000);
 }
 
@@ -350,58 +496,37 @@ async function fetchISSPosition() {
     try {
         const resp = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
         const data = await resp.json();
-
         $('#issLat').textContent = data.latitude.toFixed(4) + '°';
         $('#issLon').textContent = data.longitude.toFixed(4) + '°';
         $('#issAlt').textContent = Math.round(data.altitude) + ' km';
         $('#issVel').textContent = Math.round(data.velocity) + ' km/h';
-
         const visEl = $('#issVisibility');
-        if (visEl) {
-            visEl.innerHTML = `
-                <span class="vis-dot"></span>
-                <span>${data.visibility === 'daylight' ? '☀️ Daylight pass' : '🌙 Nighttime pass'}</span>
-            `;
-        }
-
+        if (visEl) visEl.innerHTML = `<span class="vis-dot"></span><span>${data.visibility === 'daylight' ? '☀️ Daylight' : '🌙 Nighttime'}</span>`;
         updateStatus('issStatus', 'Tracking', 'active');
     } catch (err) {
-        console.error('ISS fetch error:', err);
         updateStatus('issStatus', 'Offline', 'error');
     }
 }
 
 
-// ─── Status Updates ─────────────────────────────────────────────────
-function updateAgentStatus(text, dotClass) {
-    updateStatus('agentStatus', text, dotClass);
-}
+// ─── Status Helpers ───────────────────────────────────────────────────
+function updateAgentStatus(text, dotClass) { updateStatus('agentStatus', text, dotClass); }
 
-function updateStatus(elementId, text, dotClass) {
-    const el = $(`#${elementId}`);
-    if (el) {
-        el.innerHTML = `<span class="status-dot ${dotClass}"></span> ${text}`;
-    }
+function updateStatus(id, text, dotClass) {
+    const el = $(`#${id}`);
+    if (el) el.innerHTML = `<span class="status-dot ${dotClass}"></span> ${text}`;
 }
 
 function parseResponseForDashboard(response) {
     const lower = response.toLowerCase();
-
-    // Update weather status
-    if (lower.includes('go') && !lower.includes('no-go')) {
-        updateStatus('weatherStatus', 'GO', 'active');
-    } else if (lower.includes('no-go')) {
-        updateStatus('weatherStatus', 'NO-GO', 'error');
-    } else if (lower.includes('marginal')) {
-        updateStatus('weatherStatus', 'MARGINAL', 'pending');
-    }
+    if (lower.includes('no-go')) updateStatus('weatherStatus', 'NO-GO', 'error');
+    else if (lower.includes('marginal')) updateStatus('weatherStatus', 'MARGINAL', 'pending');
+    else if (lower.includes(' go') || lower.includes('clear sky')) updateStatus('weatherStatus', 'GO', 'active');
 }
 
 
-// ─── Utilities ──────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────────
 function setWelcomeTime() {
     const el = $('#welcomeTime');
-    if (el) {
-        el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
+    if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

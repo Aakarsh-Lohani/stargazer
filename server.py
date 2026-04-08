@@ -5,6 +5,7 @@ Designed for Cloud Run deployment (port 8080).
 """
 import os
 import uuid
+import json
 import logging
 import asyncio
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ load_dotenv()
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from google.adk.runners import Runner
@@ -74,6 +75,26 @@ app.add_middleware(
 )
 
 
+# ─── Helper: BigQuery pipeline logging (non-blocking) ────────────────
+def _log_pipeline_async(session_id, user_message, event_type, agent_name,
+                         tool_name="", tool_args=None, result_preview="", thinking=""):
+    """Fire-and-forget BQ pipeline log — wrapped so it never crashes the stream."""
+    try:
+        from stargazer_agent.tools.db_tools import log_pipeline_event_to_bq
+        log_pipeline_event_to_bq(
+            session_id=session_id,
+            user_message=user_message,
+            event_type=event_type,
+            agent_name=agent_name,
+            tool_name=tool_name,
+            tool_args=tool_args or {},
+            tool_result_preview=result_preview,
+            thinking_text=thinking,
+        )
+    except Exception as e:
+        logger.debug(f"Pipeline BQ log skipped: {e}")
+
+
 # ─── API Routes ──────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -98,74 +119,202 @@ async def health_check():
 @app.post("/api/chat")
 async def chat(request: Request):
     """
-    Main chat endpoint. Sends user message to the ADK agent and returns the response.
-    Request body: { "message": "...", "session_id": "..." (optional) }
+    Simple chat endpoint — returns only the final response.
+    For live streaming with agent pipeline visible, use /api/stream.
     """
     if runner is None:
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Agent not initialized. Check server logs."}
-        )
+        return JSONResponse(status_code=503, content={"error": "Agent not initialized."})
 
     try:
         body = await request.json()
         user_message = body.get("message", "").strip()
-        session_id = body.get("session_id", "")
+        session_id = body.get("session_id", "") or str(uuid.uuid4())
 
         if not user_message:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Message cannot be empty"}
-            )
-
-        # Create or reuse session
-        if not session_id:
-            session_id = str(uuid.uuid4())
+            return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
 
         session = await session_service.get_session(
-            app_name=APP_NAME,
-            user_id=USER_ID,
-            session_id=session_id
+            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
         )
-
         if session is None:
             session = await session_service.create_session(
-                app_name=APP_NAME,
-                user_id=USER_ID,
-                session_id=session_id
+                app_name=APP_NAME, user_id=USER_ID, session_id=session_id
             )
 
-        # Create user content
         user_content = types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=user_message)]
+            role="user", parts=[types.Part.from_text(text=user_message)]
         )
 
-        # Run the agent and collect response
         agent_response_parts = []
         async for event in runner.run_async(
-            user_id=USER_ID,
-            session_id=session_id,
-            new_message=user_content
+            user_id=USER_ID, session_id=session_id, new_message=user_content
         ):
             if event.is_final_response():
                 for part in event.content.parts:
                     if part.text:
                         agent_response_parts.append(part.text)
 
-        response_text = "\n".join(agent_response_parts) if agent_response_parts else "I'm processing your request..."
-
-        return JSONResponse(content={
-            "response": response_text,
-            "session_id": session_id
-        })
+        response_text = "\n".join(agent_response_parts) if agent_response_parts else "Processing complete."
+        return JSONResponse(content={"response": response_text, "session_id": session_id})
 
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Internal error: {str(e)}"}
+        return JSONResponse(status_code=500, content={"error": f"Internal error: {str(e)}"})
+
+
+@app.post("/api/stream")
+async def stream_chat(request: Request):
+    """
+    Streaming SSE endpoint. Emits every agent event in real-time:
+      agent_switch  — which agent is now active
+      tool_call     — tool name + arguments
+      tool_result   — tool name + result preview
+      thinking      — model reasoning text
+      text          — partial response text
+      final         — complete final response + session_id
+
+    All events are also logged to BigQuery pipeline_log table.
+    """
+    if runner is None:
+        return JSONResponse(status_code=503, content={"error": "Agent not initialized"})
+
+    body = await request.json()
+    user_message = body.get("message", "").strip()
+    session_id = body.get("session_id", "") or str(uuid.uuid4())
+
+    if not user_message:
+        return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
+
+    session = await session_service.get_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session_id
+    )
+    if session is None:
+        session = await session_service.create_session(
+            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
         )
+
+    user_content = types.Content(
+        role="user", parts=[types.Part.from_text(text=user_message)]
+    )
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+
+        final_text_parts = []
+        current_agent = "unknown"
+
+        try:
+            async for event in runner.run_async(
+                user_id=USER_ID, session_id=session_id, new_message=user_content
+            ):
+                # ── Agent switch ──────────────────────────────────
+                if hasattr(event, 'author') and event.author:
+                    if event.author != current_agent:
+                        current_agent = event.author
+                        payload = {'type': 'agent_switch', 'agent': current_agent}
+                        yield f"data: {json.dumps(payload)}\n\n"
+                        # Log to BQ (in thread pool to avoid blocking)
+                        asyncio.get_event_loop().run_in_executor(
+                            None, _log_pipeline_async,
+                            session_id, user_message, 'agent_switch',
+                            current_agent, '', {}, '', ''
+                        )
+
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        # ── Tool call ─────────────────────────────
+                        if hasattr(part, 'function_call') and part.function_call:
+                            fc = part.function_call
+                            args = dict(fc.args) if fc.args else {}
+                            payload = {'type': 'tool_call', 'tool': fc.name, 'args': args}
+                            yield f"data: {json.dumps(payload)}\n\n"
+                            asyncio.get_event_loop().run_in_executor(
+                                None, _log_pipeline_async,
+                                session_id, user_message, 'tool_call',
+                                current_agent, fc.name, args, '', ''
+                            )
+
+                        # ── Tool result ───────────────────────────
+                        elif hasattr(part, 'function_response') and part.function_response:
+                            fr = part.function_response
+                            preview = str(fr.response)[:400] if fr.response else ""
+                            payload = {'type': 'tool_result', 'tool': fr.name, 'preview': preview}
+                            yield f"data: {json.dumps(payload)}\n\n"
+                            asyncio.get_event_loop().run_in_executor(
+                                None, _log_pipeline_async,
+                                session_id, user_message, 'tool_result',
+                                current_agent, fr.name, {}, preview, ''
+                            )
+
+                        # ── Thinking ──────────────────────────────
+                        elif hasattr(part, 'thought') and part.thought and part.text:
+                            thinking = part.text[:500]
+                            payload = {'type': 'thinking', 'text': thinking}
+                            yield f"data: {json.dumps(payload)}\n\n"
+                            asyncio.get_event_loop().run_in_executor(
+                                None, _log_pipeline_async,
+                                session_id, user_message, 'thinking',
+                                current_agent, '', {}, '', thinking
+                            )
+
+                        # ── Text stream ───────────────────────────
+                        elif part.text and not (hasattr(part, 'thought') and part.thought):
+                            payload = {'type': 'text', 'text': part.text}
+                            yield f"data: {json.dumps(payload)}\n\n"
+
+                # ── Final response ────────────────────────────────
+                if event.is_final_response() and event.content:
+                    for part in event.content.parts:
+                        if part.text:
+                            final_text_parts.append(part.text)
+
+            final_response = "\n".join(final_text_parts) if final_text_parts else "Processing complete."
+            payload = {'type': 'final', 'text': final_response, 'session_id': session_id}
+            yield f"data: {json.dumps(payload)}\n\n"
+            # Log final event
+            asyncio.get_event_loop().run_in_executor(
+                None, _log_pipeline_async,
+                session_id, user_message, 'final',
+                current_agent, '', {}, final_response[:400], ''
+            )
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.get("/api/pipeline-log")
+async def get_pipeline_log(session_id: str = None, limit: int = 50):
+    """
+    Returns recent agent pipeline log entries from BigQuery.
+    Used by the Insights panel BQ Log tab.
+    Query params: ?session_id=xxx&limit=50
+    """
+    try:
+        from stargazer_agent.tools.db_tools import get_recent_pipeline_logs
+        rows = await asyncio.get_event_loop().run_in_executor(
+            None, get_recent_pipeline_logs, session_id, limit
+        )
+        # Convert datetime objects to strings for JSON serialization
+        for row in rows:
+            if 'created_at' in row and hasattr(row['created_at'], 'isoformat'):
+                row['created_at'] = row['created_at'].isoformat()
+        return JSONResponse(content={"logs": rows, "count": len(rows)})
+    except Exception as e:
+        logger.error(f"pipeline-log fetch error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e), "logs": []})
 
 
 @app.post("/api/session/new")
@@ -174,16 +323,11 @@ async def new_session():
     session_id = str(uuid.uuid4())
     try:
         await session_service.create_session(
-            app_name=APP_NAME,
-            user_id=USER_ID,
-            session_id=session_id
+            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
         )
         return {"session_id": session_id}
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e)}
-        )
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ─── Mount Static Files ─────────────────────────────────────────────

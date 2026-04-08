@@ -1,5 +1,6 @@
-"""BigQuery audit logging and event caching."""
+"""BigQuery audit logging, event caching, and agent pipeline trace logging."""
 import os
+import json
 import logging
 from datetime import datetime, timezone
 from google.cloud import bigquery
@@ -68,6 +69,78 @@ def log_event_to_bq(
     except Exception as e:
         logging.error(f"[BigQuery] log_event error: {e}")
         return {"status": "error", "details": str(e)}
+
+
+def log_pipeline_event_to_bq(
+    session_id: str,
+    user_message: str,
+    event_type: str,
+    agent_name: str,
+    tool_name: str = "",
+    tool_args: dict = None,
+    tool_result_preview: str = "",
+    thinking_text: str = "",
+) -> dict:
+    """
+    Logs a single agent pipeline event (tool call, agent switch, thinking)
+    to BigQuery for retrieval in the Insights panel.
+
+    Called directly from server.py stream handler — not an ADK tool.
+    event_type: 'agent_switch' | 'tool_call' | 'tool_result' | 'thinking' | 'final'
+    """
+    try:
+        client = _get_client()
+        if client is None:
+            return {"status": "skipped"}
+
+        row = {
+            "session_id": session_id,
+            "user_message": user_message[:500],
+            "event_type": event_type,
+            "agent_name": agent_name,
+            "tool_name": tool_name,
+            "tool_args": json.dumps(tool_args or {}),
+            "tool_result_preview": tool_result_preview[:500],
+            "thinking_text": thinking_text[:500],
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        table_id = f"{PROJECT_ID}.{DATASET}.pipeline_log"
+        errors = client.insert_rows_json(table_id, [row])
+        if errors:
+            logging.warning(f"[BigQuery] pipeline_log insert error: {errors}")
+            return {"status": "error"}
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.warning(f"[BigQuery] log_pipeline_event error: {e}")
+        return {"status": "error", "details": str(e)}
+
+
+def get_recent_pipeline_logs(session_id: str = None, limit: int = 50) -> list:
+    """
+    Retrieves recent pipeline log entries from BigQuery.
+    Used by /api/pipeline-log to populate the Insights panel BQ Log tab.
+    """
+    try:
+        client = _get_client()
+        if client is None:
+            return []
+
+        where = f"WHERE session_id = '{session_id}'" if session_id else ""
+        query = f"""
+            SELECT session_id, user_message, event_type, agent_name,
+                   tool_name, tool_args, tool_result_preview, thinking_text, created_at
+            FROM `{PROJECT_ID}.{DATASET}.pipeline_log`
+            {where}
+            ORDER BY created_at DESC
+            LIMIT {limit}
+        """
+        rows = client.query(query).result()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logging.warning(f"[BigQuery] get_recent_pipeline_logs error: {e}")
+        return []
 
 
 def cache_space_events_to_bq(
