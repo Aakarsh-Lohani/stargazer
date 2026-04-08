@@ -37,7 +37,7 @@ from google.adk import Agent
 from google.adk.agents import SequentialAgent
 from google.adk.tools.tool_context import ToolContext
 
-MODEL = os.getenv("MODEL", "gemini-2.0-flash")
+MODEL = os.getenv("MODEL", "gemini-2.0-flash-001")
 
 # ─── Import Tools ────────────────────────────────────────────────────
 from stargazer_agent.tools.space_tools import (

@@ -110,32 +110,38 @@ async function initSession() {
 
 // ─── Insights Panel ──────────────────────────────────────────────────
 function initInsightsPanel() {
-    // Tab switching
-    $$('.insights-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            $$('.insights-tab').forEach(t => t.classList.remove('active'));
-            $$('.insights-tab-content').forEach(c => c.classList.remove('active'));
-            tab.classList.add('active');
-            $(`#${tab.dataset.tab}Tab`).classList.add('active');
+    // Explicit tab content map — avoid dynamic $(`#${key}Tab`) selector issues
+    const TAB_CONTENT = {
+        trace: document.getElementById('traceTab'),
+        bqlog: document.getElementById('bqlogTab'),
+    };
 
-            // Load BQ log when switching to that tab
-            if (tab.dataset.tab === 'bqlog') loadBQLog();
+    document.querySelectorAll('.insights-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const key = tab.dataset.tab;
+            document.querySelectorAll('.insights-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.insights-tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            if (TAB_CONTENT[key]) TAB_CONTENT[key].classList.add('active');
+            if (key === 'bqlog') loadBQLog();
         });
     });
 
-    // Toggle button in panel header
-    const collapseBtn = $('#collapseInsightsBtn');
+    // ✕ collapse button inside panel
+    const collapseBtn = document.getElementById('collapseInsightsBtn');
     if (collapseBtn) {
-        collapseBtn.addEventListener('click', () => {
+        collapseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             insightsPanel.classList.add('collapsed');
             state.insightsVisible = false;
         });
     }
 
-    // Toggle from panel header button
-    const toggleBtn = $('#toggleInsightsBtn');
+    // 🧠 Insights toggle from chat panel header
+    const toggleBtn = document.getElementById('toggleInsightsBtn');
     if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
+        toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             state.insightsVisible = !state.insightsVisible;
             insightsPanel.classList.toggle('collapsed', !state.insightsVisible);
         });
@@ -350,8 +356,9 @@ async function sendMessage(message) {
 
     } catch (err) {
         thinkingEl.remove();
-        appendMessage('agent', '⚠️ Connection error. Please check if the server is running.');
-        appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">✗ Stream error: ${escapeHtml(err.message)}</span>`);
+        const errMsg = err.message || String(err);
+        appendMessage('agent', `⚠️ Connection error: ${errMsg}`);
+        appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">✗ ${escapeHtml(errMsg)}</span>`);
         updateAgentStatus('Offline', 'error');
     }
 
@@ -390,9 +397,9 @@ function processStreamEvent(evt, thinkingEl) {
         }
     }
 
-    if (evt.type === 'thinking') {
-        const text = (evt.text || '').slice(0, 200);
-        appendTraceEntry(`${tsLabel()}<span class="trace-think">💭 ${escapeHtml(text)}${evt.text?.length > 200 ? '…' : ''}</span>`);
+    if (evt.type === 'error') {
+        updateThinkingBar(thinkingEl, `❌ Error`);
+        appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">❌ ${escapeHtml(evt.message || 'Unknown error')}</span>`);
     }
 }
 

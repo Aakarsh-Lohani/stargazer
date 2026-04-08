@@ -8,6 +8,7 @@ import uuid
 import json
 import logging
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -37,6 +38,58 @@ session_service = InMemorySessionService()
 runner = None
 APP_NAME = "stargazer"
 USER_ID = "stargazer_user"
+
+
+async def get_or_create_session(session_id: str):
+    """Get existing session or create a new one if terminated/missing."""
+    session = await session_service.get_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session_id
+    )
+    if session is None:
+        session = await session_service.create_session(
+            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
+        )
+    return session
+
+
+async def run_agent_with_retry(user_id, session_id, new_message, max_retries=3):
+    """
+    Runs the ADK agent with exponential backoff retry for 429 RESOURCE_EXHAUSTED.
+    Yields events from runner.run_async().
+    Raises the last exception if all retries fail.
+    """
+    delay = 2.0
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            events = []
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=new_message
+            ):
+                events.append(event)
+            for event in events:
+                yield event
+            return  # success
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            if '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str:
+                if attempt < max_retries - 1:
+                    wait = delay * (2 ** attempt)
+                    logger.warning(f"[429] Rate limited. Retrying in {wait:.1f}s (attempt {attempt+1}/{max_retries})")
+                    await asyncio.sleep(wait)
+                    # Recreate session in case it was lost during wait
+                    await get_or_create_session(session_id)
+                    continue
+            elif 'Session terminated' in err_str or 'session' in err_str.lower():
+                logger.warning(f"[Session] Session lost, recreating and retrying")
+                await get_or_create_session(session_id)
+                if attempt < max_retries - 1:
+                    continue
+            break
+    raise last_err
 
 
 @asynccontextmanager
@@ -133,22 +186,14 @@ async def chat(request: Request):
         if not user_message:
             return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
 
-        session = await session_service.get_session(
-            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
-        )
-        if session is None:
-            session = await session_service.create_session(
-                app_name=APP_NAME, user_id=USER_ID, session_id=session_id
-            )
+        await get_or_create_session(session_id)
 
         user_content = types.Content(
             role="user", parts=[types.Part.from_text(text=user_message)]
         )
 
         agent_response_parts = []
-        async for event in runner.run_async(
-            user_id=USER_ID, session_id=session_id, new_message=user_content
-        ):
+        async for event in run_agent_with_retry(USER_ID, session_id, user_content):
             if event.is_final_response():
                 for part in event.content.parts:
                     if part.text:
@@ -159,7 +204,14 @@ async def chat(request: Request):
 
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
-        return JSONResponse(status_code=500, content={"error": f"Internal error: {str(e)}"})
+        err_str = str(e)
+        if '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str:
+            msg = "⏳ The AI model is under heavy load right now. Please wait 30 seconds and try again."
+        elif 'Session terminated' in err_str:
+            msg = "🔄 Session expired. Please send your message again."
+        else:
+            msg = f"Internal error: {err_str}"
+        return JSONResponse(status_code=500, content={"error": msg})
 
 
 @app.post("/api/stream")
@@ -185,13 +237,7 @@ async def stream_chat(request: Request):
     if not user_message:
         return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
 
-    session = await session_service.get_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session_id
-    )
-    if session is None:
-        session = await session_service.create_session(
-            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
-        )
+    await get_or_create_session(session_id)
 
     user_content = types.Content(
         role="user", parts=[types.Part.from_text(text=user_message)]
@@ -204,9 +250,7 @@ async def stream_chat(request: Request):
         current_agent = "unknown"
 
         try:
-            async for event in runner.run_async(
-                user_id=USER_ID, session_id=session_id, new_message=user_content
-            ):
+            async for event in run_agent_with_retry(USER_ID, session_id, user_content):
                 # ── Agent switch ──────────────────────────────────
                 if hasattr(event, 'author') and event.author:
                     if event.author != current_agent:
@@ -280,7 +324,14 @@ async def stream_chat(request: Request):
 
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            err_str = str(e)
+            if '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str:
+                msg = "⏳ The AI model is under heavy load. Waited and retried but still rate-limited. Please wait 30 seconds and try again."
+            elif 'Session terminated' in err_str:
+                msg = "🔄 Session expired. Your message was not lost — please resend it."
+            else:
+                msg = f"Error: {err_str[:300]}"
+            yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
 
         yield "data: [DONE]\n\n"
 
