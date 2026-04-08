@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StarGazer — Space Observation Assistant</title>
+    <meta name="description" content="AI-powered space observation assistant. Track ISS, meteor showers, launches, and find the perfect dark sky spot.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌌</text></svg>">
+</head>
+<body>
+    <!-- Stars Background -->
+    <div class="stars-container" id="starsContainer"></div>
+    <div class="shooting-star" id="shootingStar1"></div>
+    <div class="shooting-star" id="shootingStar2"></div>
+
+    <!-- Main Layout -->
+    <div class="app-container">
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🔭</span>
+                    <div class="logo-text">
+                        <h1>StarGazer</h1>
+                        <span class="logo-subtitle">Mission Control</span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-panel="chat" id="navChat">
+                    <span class="nav-icon">💬</span>
+                    <span>Mission Chat</span>
+                </button>
+                <button class="nav-btn" data-panel="dashboard" id="navDashboard">
+                    <span class="nav-icon">📡</span>
+                    <span>Dashboard</span>
+                </button>
+                <button class="nav-btn" data-panel="events" id="navEvents">
+                    <span class="nav-icon">🌠</span>
+                    <span>Events</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-status">
+                <div class="status-card" id="issStatusCard">
+                    <div class="status-label">ISS Status</div>
+                    <div class="status-value" id="issStatus">
+                        <span class="status-dot active"></span>
+                        Tracking
+                    </div>
+                </div>
+                <div class="status-card" id="weatherStatusCard">
+                    <div class="status-label">Weather</div>
+                    <div class="status-value" id="weatherStatus">
+                        <span class="status-dot pending"></span>
+                        Pending
+                    </div>
+                </div>
+                <div class="status-card" id="agentStatusCard">
+                    <div class="status-label">Agent</div>
+                    <div class="status-value" id="agentStatus">
+                        <span class="status-dot active"></span>
+                        Online
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="new-session-btn" id="newSessionBtn">
+                    <span>✨</span> New Session
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- Chat Panel (Default) -->
+            <section class="panel active" id="chatPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <h2>🌌 Mission Chat</h2>
+                        <span class="panel-badge" id="sessionBadge">Session Active</span>
+                    </div>
+                    <div class="panel-actions">
+                        <button class="action-btn" id="clearChatBtn" title="Clear chat">🗑️</button>
+                    </div>
+                </div>
+
+                <div class="chat-container" id="chatContainer">
+                    <div class="chat-messages" id="chatMessages">
+                        <!-- Welcome Message -->
+                        <div class="message agent-message welcome-message">
+                            <div class="message-avatar">🔭</div>
+                            <div class="message-content">
+                                <div class="message-header">
+                                    <span class="message-sender">StarGazer</span>
+                                    <span class="message-time" id="welcomeTime"></span>
+                                </div>
+                                <div class="message-body">
+                                    <p>Welcome to <strong>StarGazer Mission Control</strong> 🌌</p>
+                                    <p>I'm your AI assistant for space observation planning. I can help you:</p>
+                                    <ul>
+                                        <li>🛰️ Track the ISS and predict visible passes</li>
+                                        <li>🚀 Find upcoming rocket launches</li>
+                                        <li>☄️ Alert you to meteor showers & eclipses</li>
+                                        <li>🌤️ Check weather GO/NO-GO conditions</li>
+                                        <li>🗺️ Find dark sky observation spots</li>
+                                        <li>📅 Schedule events on your calendar</li>
+                                    </ul>
+                                    <p class="hint-text">Try: <em>"I want to see the ISS tonight from Mumbai"</em></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-input-area">
+                    <div class="quick-prompts" id="quickPrompts">
+                        <button class="quick-btn" data-prompt="I want to see the ISS tonight from Mumbai">🛰️ ISS from Mumbai</button>
+                        <button class="quick-btn" data-prompt="Show me upcoming rocket launches">🚀 Launches</button>
+                        <button class="quick-btn" data-prompt="What meteor showers are coming up? I'm in Delhi.">☄️ Meteor Showers</button>
+                        <button class="quick-btn" data-prompt="Show me upcoming eclipses">🌑 Eclipses</button>
+                    </div>
+                    <form class="chat-form" id="chatForm">
+                        <div class="input-wrapper">
+                            <textarea
+                                id="chatInput"
+                                placeholder="Describe what you want to observe and your location..."
+                                rows="1"
+                                maxlength="500"
+                            ></textarea>
+                            <button type="submit" class="send-btn" id="sendBtn" title="Send message">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 2L11 13"></path>
+                                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Dashboard Panel -->
+            <section class="panel" id="dashboardPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <h2>📡 Live Dashboard</h2>
+                        <span class="panel-badge live">LIVE</span>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="dash-card iss-card" id="issCard">
+                        <div class="dash-card-header">
+                            <h3>🛰️ ISS Position</h3>
+                            <button class="refresh-btn" id="refreshIss" title="Refresh">↻</button>
+                        </div>
+                        <div class="dash-card-body">
+                            <div class="iss-coords">
+                                <div class="coord">
+                                    <span class="coord-label">LAT</span>
+                                    <span class="coord-value" id="issLat">—</span>
+                                </div>
+                                <div class="coord">
+                                    <span class="coord-label">LON</span>
+                                    <span class="coord-value" id="issLon">—</span>
+                                </div>
+                                <div class="coord">
+                                    <span class="coord-label">ALT</span>
+                                    <span class="coord-value" id="issAlt">—</span>
+                                </div>
+                                <div class="coord">
+                                    <span class="coord-label">VEL</span>
+                                    <span class="coord-value" id="issVel">—</span>
+                                </div>
+                            </div>
+                            <div class="iss-visibility" id="issVisibility">
+                                <span class="vis-dot"></span>
+                                <span>Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dash-card launches-card">
+                        <div class="dash-card-header">
+                            <h3>🚀 Next Launch</h3>
+                        </div>
+                        <div class="dash-card-body" id="nextLaunchInfo">
+                            <p class="placeholder-text">Ask about launches in the chat to load data</p>
+                        </div>
+                    </div>
+
+                    <div class="dash-card weather-card">
+                        <div class="dash-card-header">
+                            <h3>🌤️ Weather Status</h3>
+                        </div>
+                        <div class="dash-card-body" id="weatherInfo">
+                            <p class="placeholder-text">Check weather via chat to see conditions</p>
+                        </div>
+                    </div>
+
+                    <div class="dash-card mission-card">
+                        <div class="dash-card-header">
+                            <h3>📋 Mission Brief</h3>
+                        </div>
+                        <div class="dash-card-body" id="missionInfo">
+                            <p class="placeholder-text">Your personalized mission brief will appear here after planning</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Events Panel -->
+            <section class="panel" id="eventsPanel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <h2>🌠 Upcoming Events</h2>
+                    </div>
+                </div>
+                <div class="events-grid" id="eventsGrid">
+                    <div class="event-card meteor">
+                        <div class="event-icon">☄️</div>
+                        <div class="event-details">
+                            <h4>Perseid Meteor Shower</h4>
+                            <p class="event-date">Aug 12, 2025</p>
+                            <p class="event-desc">Up to 100 meteors/hour. Best viewed after midnight.</p>
+                        </div>
+                        <span class="event-type-badge">Meteor Shower</span>
+                    </div>
+                    <div class="event-card eclipse">
+                        <div class="event-icon">🌑</div>
+                        <div class="event-details">
+                            <h4>Total Lunar Eclipse</h4>
+                            <p class="event-date">Sep 7, 2025</p>
+                            <p class="event-desc">Visible from Europe, Africa, Asia. Blood Moon!</p>
+                        </div>
+                        <span class="event-type-badge">Eclipse</span>
+                    </div>
+                    <div class="event-card meteor">
+                        <div class="event-icon">☄️</div>
+                        <div class="event-details">
+                            <h4>Geminid Meteor Shower</h4>
+                            <p class="event-date">Dec 13, 2025</p>
+                            <p class="event-desc">Best annual shower — up to 120 meteors/hour.</p>
+                        </div>
+                        <span class="event-type-badge">Meteor Shower</span>
+                    </div>
+                    <div class="event-card eclipse">
+                        <div class="event-icon">🌑</div>
+                        <div class="event-details">
+                            <h4>Total Lunar Eclipse</h4>
+                            <p class="event-date">Mar 3, 2026</p>
+                            <p class="event-desc">Visible from Americas, Europe, Africa. Blood Moon.</p>
+                        </div>
+                        <span class="event-type-badge">Eclipse</span>
+                    </div>
+                    <div class="event-card moon">
+                        <div class="event-icon">🌕</div>
+                        <div class="event-details">
+                            <h4>Full Moon — Harvest Moon</h4>
+                            <p class="event-date">Sep 7, 2025</p>
+                            <p class="event-desc">September Full Moon — great for photography.</p>
+                        </div>
+                        <span class="event-type-badge">Full Moon</span>
+                    </div>
+                    <div class="event-card meteor">
+                        <div class="event-icon">☄️</div>
+                        <div class="event-details">
+                            <h4>Quadrantid Meteor Shower</h4>
+                            <p class="event-date">Jan 3, 2026</p>
+                            <p class="event-desc">Up to 120 meteors/hour. Brief 6-hour peak window.</p>
+                        </div>
+                        <span class="event-type-badge">Meteor Shower</span>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Mobile Menu Toggle -->
+    <button class="mobile-menu-btn" id="mobileMenuBtn">☰</button>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
