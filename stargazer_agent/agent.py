@@ -97,9 +97,9 @@ def save_user_request(tool_context: ToolContext, request: str, user_location: st
 
     # If this is a NEW request, clear old state so subagents fetch fresh data
     if current_saved_request != request:
-        tool_context.state.pop("ORBITAL_DATA", None)
-        tool_context.state.pop("WEATHER_DATA", None)
-        tool_context.state.pop("MISSION_BRIEF", None)
+        tool_context.state["ORBITAL_DATA"] = None
+        tool_context.state["WEATHER_DATA"] = None
+        tool_context.state["MISSION_BRIEF"] = None
 
     tool_context.state["USER_REQUEST"] = request
     tool_context.state["USER_LOCATION"] = user_location
