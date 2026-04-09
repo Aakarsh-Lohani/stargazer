@@ -80,11 +80,13 @@ def save_user_request(tool_context: ToolContext, request: str, user_location: st
     request: the user's full intent e.g. 'I want to see the ISS tonight from Mumbai'
     user_location: city or 'lat,lon' e.g. 'mumbai' or '19.07,72.88'
     """
-    # RE-ENTRY GUARD: If the workflow already ran (ORBITAL_DATA or MISSION_BRIEF exist),
+    current_saved_request = tool_context.state.get("USER_REQUEST")
+
+    # RE-ENTRY GUARD: If the workflow already ran for THIS EXACT REQUEST,
     # do NOT transfer again. This prevents the infinite loop where:
-    # greeter → workflow → greeter → workflow → ... → session dies
-    if tool_context.state.get("ORBITAL_DATA") or tool_context.state.get("MISSION_BRIEF"):
-        logging.info("[Guard] Workflow already completed. NOT re-transferring.")
+    # greeter → workflow → greeter → workflow → ... within the same turn.
+    if current_saved_request == request and (tool_context.state.get("ORBITAL_DATA") or tool_context.state.get("MISSION_BRIEF")):
+        logging.info("[Guard] Workflow already completed for this request. NOT re-transferring.")
         return {
             "status": "already_completed",
             "message": "The workflow already ran. Present the results from ORBITAL_DATA, WEATHER_DATA, and MISSION_BRIEF to the user.",
@@ -92,6 +94,12 @@ def save_user_request(tool_context: ToolContext, request: str, user_location: st
             "weather_data_exists": bool(tool_context.state.get("WEATHER_DATA")),
             "mission_brief_exists": bool(tool_context.state.get("MISSION_BRIEF")),
         }
+
+    # If this is a NEW request, clear old state so subagents fetch fresh data
+    if current_saved_request != request:
+        tool_context.state.pop("ORBITAL_DATA", None)
+        tool_context.state.pop("WEATHER_DATA", None)
+        tool_context.state.pop("MISSION_BRIEF", None)
 
     tool_context.state["USER_REQUEST"] = request
     tool_context.state["USER_LOCATION"] = user_location
