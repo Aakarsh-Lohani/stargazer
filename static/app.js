@@ -303,6 +303,7 @@ async function sendMessage(message) {
 
     // Start a trace block in the Insights panel
     const traceBlock = startTraceSession(message);
+    state._textStreamStarted = false;
 
     // Show "thinking" in chat as a minimal status indicator
     const thinkingEl = showThinkingBar();
@@ -336,7 +337,7 @@ async function sendMessage(message) {
                 try {
                     const evt = JSON.parse(raw);
                     processStreamEvent(evt, thinkingEl);
-                    if (evt.type === 'session') state.sessionId = evt.session_id;
+                    if (evt.type === 'meta') state.sessionId = evt.session_id;
                     if (evt.type === 'final') finalResponse = evt.text;
                 } catch (_) {}
             }
@@ -369,12 +370,36 @@ async function sendMessage(message) {
 
 // ─── Process Stream Event → Insights Panel ───────────────────────────
 function processStreamEvent(evt, thinkingEl) {
-    if (evt.type === 'agent_switch') {
-        const icon = AGENT_ICONS[evt.agent] || '🤖';
-        updateThinkingBar(thinkingEl, `${icon} ${evt.agent}`);
-        appendTraceEntry(`${tsLabel()}<span class="trace-agent">${icon} ${escapeHtml(evt.agent)}</span>`);
+    // ── Meta: model + session (emitted once at start) ──
+    if (evt.type === 'meta') {
+        state.currentModel = evt.model || 'unknown';
+        appendTraceEntry(`${tsLabel()}<span style="color:#818cf8">📋 <strong>Model:</strong> ${escapeHtml(evt.model)}</span>`);
+        appendTraceEntry(`${tsLabel()}<span style="color:#475569">🔑 Session: ${escapeHtml((evt.session_id || '').slice(0, 8))}...</span>`);
     }
 
+    // ── Agent switch (with model badge + event ID) ──
+    if (evt.type === 'agent_switch') {
+        const icon = AGENT_ICONS[evt.agent] || '🤖';
+        const modelBadge = evt.model ? ` <span style="background:rgba(124,58,237,0.2);color:#a78bfa;padding:1px 6px;border-radius:4px;font-size:0.62rem">${escapeHtml(evt.model)}</span>` : '';
+        updateThinkingBar(thinkingEl, `${icon} ${evt.agent}`);
+        appendTraceEntry(`${tsLabel()}<span class="trace-agent">${icon} <strong>${escapeHtml(evt.agent)}</strong></span>${modelBadge}`);
+    }
+
+    // ── Agent transfer (root → workflow → sub-agent) ──
+    if (evt.type === 'transfer') {
+        const fromIcon = AGENT_ICONS[evt.from_agent] || '🤖';
+        const toIcon = AGENT_ICONS[evt.to_agent] || '🤖';
+        updateThinkingBar(thinkingEl, `↗️ → ${evt.to_agent}`);
+        appendTraceEntry(`${tsLabel()}<span style="color:#f59e0b">↗️ <strong>Transfer:</strong> ${fromIcon} ${escapeHtml(evt.from_agent)} → ${toIcon} ${escapeHtml(evt.to_agent)}</span>`);
+    }
+
+    // ── State update (session state keys changed) ──
+    if (evt.type === 'state_update') {
+        const keys = (evt.keys || []).map(k => `<code style="color:#fbbf24;font-size:0.65rem">${escapeHtml(k)}</code>`).join(', ');
+        appendTraceEntry(`${tsLabel()}<span style="color:#475569">📦 State: ${keys}</span>`);
+    }
+
+    // ── Tool call (with args) ──
     if (evt.type === 'tool_call') {
         const argsFormatted = Object.entries(evt.args || {})
             .filter(([, v]) => v !== '' && v !== null)
@@ -384,21 +409,36 @@ function processStreamEvent(evt, thinkingEl) {
         appendTraceEntry(`${tsLabel()}<span class="trace-tool">🔧 ${escapeHtml(evt.tool)}(${argsFormatted})</span> <span id="tc-${evt.tool}-spinner" style="color:#64748b">⏳</span>`);
     }
 
+    // ── Tool result ──
     if (evt.type === 'tool_result') {
-        // Update the spinner on the matching tool call entry
         const entries = state.currentTraceSession?.querySelectorAll('.trace-entry') || [];
         for (let i = entries.length - 1; i >= 0; i--) {
             const spinner = entries[i].querySelector(`[id="tc-${evt.tool}-spinner"]`);
             if (spinner) { spinner.textContent = '✓'; spinner.style.color = '#34d399'; break; }
         }
         if (evt.preview) {
-            const preview = evt.preview.slice(0, 120) + (evt.preview.length > 120 ? '…' : '');
+            const preview = evt.preview.slice(0, 150) + (evt.preview.length > 150 ? '…' : '');
             appendTraceEntry(`${tsLabel()}<span class="trace-tool-ok">↳ ${escapeHtml(preview)}</span>`);
         }
     }
 
+    // ── Model thinking / reasoning ──
+    if (evt.type === 'thinking') {
+        const text = (evt.text || '').slice(0, 250);
+        appendTraceEntry(`${tsLabel()}<span class="trace-think">💭 ${escapeHtml(text)}${(evt.text || '').length > 250 ? '…' : ''}</span>`);
+    }
+
+    // ── Streaming text (just one line to avoid flooding) ──
+    if (evt.type === 'text') {
+        if (!state._textStreamStarted) {
+            appendTraceEntry(`${tsLabel()}<span style="color:#475569">📝 Agent composing response...</span>`);
+            state._textStreamStarted = true;
+        }
+    }
+
+    // ── Error ──
     if (evt.type === 'error') {
-        updateThinkingBar(thinkingEl, `❌ Error`);
+        updateThinkingBar(thinkingEl, '❌ Error');
         appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">❌ ${escapeHtml(evt.message || 'Unknown error')}</span>`);
     }
 }

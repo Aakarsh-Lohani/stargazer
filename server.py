@@ -244,10 +244,13 @@ async def stream_chat(request: Request):
     )
 
     async def event_generator():
-        yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+        # Emit session + model metadata first (like ADK web UI does)
+        from stargazer_agent.agent import MODEL as AGENT_MODEL
+        yield f"data: {json.dumps({'type': 'meta', 'session_id': session_id, 'model': AGENT_MODEL})}\n\n"
 
         final_text_parts = []
         current_agent = "unknown"
+        event_count = 0
 
         try:
             async for event in run_agent_with_retry(USER_ID, session_id, user_content):
@@ -255,14 +258,38 @@ async def stream_chat(request: Request):
                 if hasattr(event, 'author') and event.author:
                     if event.author != current_agent:
                         current_agent = event.author
-                        payload = {'type': 'agent_switch', 'agent': current_agent}
+                        event_count += 1
+                        payload = {
+                            'type': 'agent_switch',
+                            'agent': current_agent,
+                            'model': AGENT_MODEL,
+                            'event_id': getattr(event, 'id', f'evt-{event_count}'),
+                            'invocation_id': getattr(event, 'invocation_id', ''),
+                        }
                         yield f"data: {json.dumps(payload)}\n\n"
-                        # Log to BQ (in thread pool to avoid blocking)
                         asyncio.get_event_loop().run_in_executor(
                             None, _log_pipeline_async,
                             session_id, user_message, 'agent_switch',
                             current_agent, '', {}, '', ''
                         )
+
+                # ── Agent transfer actions ────────────────────────
+                if hasattr(event, 'actions') and event.actions:
+                    actions = event.actions
+                    if hasattr(actions, 'transfer_to_agent') and actions.transfer_to_agent:
+                        event_count += 1
+                        payload = {
+                            'type': 'transfer',
+                            'from_agent': current_agent,
+                            'to_agent': actions.transfer_to_agent,
+                            'event_id': getattr(event, 'id', f'evt-{event_count}'),
+                        }
+                        yield f"data: {json.dumps(payload)}\n\n"
+                    if hasattr(actions, 'state_delta') and actions.state_delta:
+                        state_keys = list(actions.state_delta.keys()) if isinstance(actions.state_delta, dict) else []
+                        if state_keys:
+                            payload = {'type': 'state_update', 'keys': state_keys[:5]}
+                            yield f"data: {json.dumps(payload)}\n\n"
 
                 if event.content and event.content.parts:
                     for part in event.content.parts:
