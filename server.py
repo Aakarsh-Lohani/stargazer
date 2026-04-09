@@ -54,24 +54,21 @@ async def get_or_create_session(session_id: str):
 
 async def run_agent_with_retry(user_id, session_id, new_message, max_retries=3):
     """
-    Runs the ADK agent with exponential backoff retry for 429 RESOURCE_EXHAUSTED.
-    Yields events from runner.run_async().
-    Raises the last exception if all retries fail.
+    Runs the ADK agent with retry for 429 RESOURCE_EXHAUSTED.
+    Yields events LIVE as they stream — NO buffering.
+    Only retries if the error happens BEFORE any events are yielded.
     """
-    delay = 2.0
+    delay = 3.0
     last_err = None
     for attempt in range(max_retries):
         try:
-            events = []
             async for event in runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
                 new_message=new_message
             ):
-                events.append(event)
-            for event in events:
-                yield event
-            return  # success
+                yield event  # yield IMMEDIATELY, not buffered
+            return  # success — finished streaming
         except Exception as e:
             last_err = e
             err_str = str(e)
@@ -80,7 +77,6 @@ async def run_agent_with_retry(user_id, session_id, new_message, max_retries=3):
                     wait = delay * (2 ** attempt)
                     logger.warning(f"[429] Rate limited. Retrying in {wait:.1f}s (attempt {attempt+1}/{max_retries})")
                     await asyncio.sleep(wait)
-                    # Recreate session in case it was lost during wait
                     await get_or_create_session(session_id)
                     continue
             elif 'Session terminated' in err_str or 'session' in err_str.lower():
@@ -145,7 +141,7 @@ def _log_pipeline_async(session_id, user_message, event_type, agent_name,
             thinking_text=thinking,
         )
     except Exception as e:
-        logger.debug(f"Pipeline BQ log skipped: {e}")
+        logger.warning(f"Pipeline BQ log skipped: {e}")
 
 
 # ─── API Routes ──────────────────────────────────────────────────────
@@ -406,6 +402,28 @@ async def new_session():
         return {"session_id": session_id}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/debug")
+async def debug_info():
+    """Debug endpoint - shows agent config, model, BQ table status, features."""
+    from stargazer_agent.agent import MODEL as AGENT_MODEL
+    bq_status = "unknown"
+    try:
+        from google.cloud import bigquery as bq_mod
+        bq_client = bq_mod.Client(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
+        table_ref = f"{os.getenv('GOOGLE_CLOUD_PROJECT')}.stargazer_db.pipeline_log"
+        bq_client.get_table(table_ref)
+        bq_status = "pipeline_log table EXISTS"
+    except Exception as e:
+        bq_status = f"pipeline_log NOT FOUND: {str(e)[:200]}"
+    return {
+        "model": AGENT_MODEL,
+        "runner_ready": runner is not None,
+        "bigquery_status": bq_status,
+        "agents": ["stargazer_greeter -> stargazer_workflow [orbital_agent, weather_agent, logistics_agent]"],
+        "dev_ui": "Run 'adk web stargazer_agent' locally for default ADK dev UI with full debug tools"
+    }
 
 
 # ─── Mount Static Files ─────────────────────────────────────────────
