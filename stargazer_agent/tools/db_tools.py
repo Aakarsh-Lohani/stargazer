@@ -6,8 +6,20 @@ from datetime import datetime, timezone
 from google.cloud import bigquery
 from google.adk.tools.tool_context import ToolContext
 
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCLOUD_PROJECT") or os.getenv("GCP_PROJECT")
 DATASET = "stargazer_db"
+
+# Auto-detect project on Cloud Run if env var not set
+if not PROJECT_ID:
+    try:
+        import requests as _req
+        _r = _req.get('http://metadata.google.internal/computeMetadata/v1/project/project-id',
+                       headers={'Metadata-Flavor': 'Google'}, timeout=2)
+        if _r.status_code == 200:
+            PROJECT_ID = _r.text
+            logging.info(f"[BigQuery] Auto-detected project: {PROJECT_ID}")
+    except Exception:
+        pass
 
 _client = None
 
@@ -16,8 +28,12 @@ def _get_client():
     """Lazy-init BigQuery client so import doesn't crash without credentials."""
     global _client
     if _client is None:
+        if not PROJECT_ID:
+            logging.warning("[BigQuery] PROJECT_ID not set — cannot initialize client")
+            return None
         try:
             _client = bigquery.Client(project=PROJECT_ID)
+            logging.info(f"[BigQuery] Client initialized for project: {PROJECT_ID}")
         except Exception as e:
             logging.error(f"[BigQuery] Client init failed: {e}")
             return None
@@ -106,10 +122,11 @@ def log_pipeline_event_to_bq(
         }
 
         table_id = f"{PROJECT_ID}.{DATASET}.pipeline_log"
+        logging.info(f"[BigQuery] Inserting pipeline event: {event_type} / {agent_name} / {tool_name}")
         errors = client.insert_rows_json(table_id, [row])
         if errors:
             logging.warning(f"[BigQuery] pipeline_log insert error: {errors}")
-            return {"status": "error"}
+            return {"status": "error", "details": str(errors)}
 
         return {"status": "success"}
     except Exception as e:

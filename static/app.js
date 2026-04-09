@@ -370,36 +370,66 @@ async function sendMessage(message) {
 
 // ─── Process Stream Event → Insights Panel ───────────────────────────
 function processStreamEvent(evt, thinkingEl) {
-    // ── Meta: model + session (emitted once at start) ──
+    // Friendly agent descriptions for chat progress
+    const AGENT_LABELS = {
+        'stargazer_greeter': 'Mission Control received your request',
+        'orbital_agent': 'Orbital Agent scanning space data...',
+        'weather_agent': 'Weather Agent checking sky conditions...',
+        'logistics_agent': 'Logistics Agent finding observation spots...',
+        'stargazer_workflow': 'Starting observation pipeline...',
+    };
+    const TOOL_LABELS = {
+        'save_user_request': '📋 Saving your request',
+        'get_iss_current_position': '🛰️ Fetching live ISS position',
+        'get_iss_passes_for_location': '🛰️ Calculating ISS passes for your location',
+        'get_upcoming_launches': '🚀 Checking upcoming rocket launches',
+        'get_space_events': '🌠 Searching space events',
+        'get_moon_phases': '🌙 Getting moon phase data',
+        'get_nasa_apod': '📸 Fetching NASA Picture of the Day',
+        'get_near_earth_objects': '☄️ Scanning near-Earth asteroids',
+        'get_celestial_events': '🔭 Gathering celestial events',
+        'check_weather_for_observation': '🌤️ Checking weather conditions',
+        'find_clear_window_nearby_days': '🌤️ Searching for clear sky windows',
+        'cache_space_events_to_bq': '💾 Caching events to database',
+        'create_stargazing_calendar_event': '📅 Creating calendar event',
+        'log_event_to_bq': '📊 Logging to audit trail',
+    };
+
+    // ── Meta ──
     if (evt.type === 'meta') {
         state.currentModel = evt.model || 'unknown';
         appendTraceEntry(`${tsLabel()}<span style="color:#818cf8">📋 <strong>Model:</strong> ${escapeHtml(evt.model)}</span>`);
         appendTraceEntry(`${tsLabel()}<span style="color:#475569">🔑 Session: ${escapeHtml((evt.session_id || '').slice(0, 8))}...</span>`);
+        addProgressLine(thinkingEl, `<span style="color:#818cf8">Using model: ${escapeHtml(evt.model)}</span>`);
     }
 
-    // ── Agent switch (with model badge + event ID) ──
+    // ── Agent switch ──
     if (evt.type === 'agent_switch') {
         const icon = AGENT_ICONS[evt.agent] || '🤖';
         const modelBadge = evt.model ? ` <span style="background:rgba(124,58,237,0.2);color:#a78bfa;padding:1px 6px;border-radius:4px;font-size:0.62rem">${escapeHtml(evt.model)}</span>` : '';
         updateThinkingBar(thinkingEl, `${icon} ${evt.agent}`);
         appendTraceEntry(`${tsLabel()}<span class="trace-agent">${icon} <strong>${escapeHtml(evt.agent)}</strong></span>${modelBadge}`);
+        // Chat progress
+        const label = AGENT_LABELS[evt.agent] || `${icon} ${evt.agent} activated`;
+        addProgressLine(thinkingEl, `<span style="color:#a78bfa">${icon} ${label}</span>`);
     }
 
-    // ── Agent transfer (root → workflow → sub-agent) ──
+    // ── Agent transfer ──
     if (evt.type === 'transfer') {
         const fromIcon = AGENT_ICONS[evt.from_agent] || '🤖';
         const toIcon = AGENT_ICONS[evt.to_agent] || '🤖';
         updateThinkingBar(thinkingEl, `↗️ → ${evt.to_agent}`);
         appendTraceEntry(`${tsLabel()}<span style="color:#f59e0b">↗️ <strong>Transfer:</strong> ${fromIcon} ${escapeHtml(evt.from_agent)} → ${toIcon} ${escapeHtml(evt.to_agent)}</span>`);
+        addProgressLine(thinkingEl, `<span style="color:#f59e0b">↗️ Handing off to ${escapeHtml(evt.to_agent)}</span>`);
     }
 
-    // ── State update (session state keys changed) ──
+    // ── State update ──
     if (evt.type === 'state_update') {
         const keys = (evt.keys || []).map(k => `<code style="color:#fbbf24;font-size:0.65rem">${escapeHtml(k)}</code>`).join(', ');
         appendTraceEntry(`${tsLabel()}<span style="color:#475569">📦 State: ${keys}</span>`);
     }
 
-    // ── Tool call (with args) ──
+    // ── Tool call ──
     if (evt.type === 'tool_call') {
         const argsFormatted = Object.entries(evt.args || {})
             .filter(([, v]) => v !== '' && v !== null)
@@ -407,6 +437,9 @@ function processStreamEvent(evt, thinkingEl) {
             .join(', ');
         updateThinkingBar(thinkingEl, `🔧 ${evt.tool}`);
         appendTraceEntry(`${tsLabel()}<span class="trace-tool">🔧 ${escapeHtml(evt.tool)}(${argsFormatted})</span> <span id="tc-${evt.tool}-spinner" style="color:#64748b">⏳</span>`);
+        // Chat progress — friendly tool description
+        const toolLabel = TOOL_LABELS[evt.tool] || `🔧 Running ${evt.tool}`;
+        addProgressLine(thinkingEl, `<span style="color:#60a5fa">${toolLabel}...</span>`);
     }
 
     // ── Tool result ──
@@ -419,19 +452,22 @@ function processStreamEvent(evt, thinkingEl) {
         if (evt.preview) {
             const preview = evt.preview.slice(0, 150) + (evt.preview.length > 150 ? '…' : '');
             appendTraceEntry(`${tsLabel()}<span class="trace-tool-ok">↳ ${escapeHtml(preview)}</span>`);
+            // Chat progress — summarise what was found
+            addProgressLine(thinkingEl, `<span style="color:#34d399">✓ ${escapeHtml(evt.tool)} returned data</span>`);
         }
     }
 
-    // ── Model thinking / reasoning ──
+    // ── Model thinking ──
     if (evt.type === 'thinking') {
         const text = (evt.text || '').slice(0, 250);
         appendTraceEntry(`${tsLabel()}<span class="trace-think">💭 ${escapeHtml(text)}${(evt.text || '').length > 250 ? '…' : ''}</span>`);
     }
 
-    // ── Streaming text (just one line to avoid flooding) ──
+    // ── Streaming text ──
     if (evt.type === 'text') {
         if (!state._textStreamStarted) {
             appendTraceEntry(`${tsLabel()}<span style="color:#475569">📝 Agent composing response...</span>`);
+            addProgressLine(thinkingEl, `<span style="color:#34d399">📝 Composing your mission brief...</span>`);
             state._textStreamStarted = true;
         }
     }
@@ -440,6 +476,7 @@ function processStreamEvent(evt, thinkingEl) {
     if (evt.type === 'error') {
         updateThinkingBar(thinkingEl, '❌ Error');
         appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">❌ ${escapeHtml(evt.message || 'Unknown error')}</span>`);
+        addProgressLine(thinkingEl, `<span style="color:#f87171">❌ ${escapeHtml(evt.message || 'Error occurred')}</span>`);
     }
 }
 
@@ -456,11 +493,11 @@ function showThinkingBar() {
                 <span class="message-sender" id="thinkingLabel">Initializing agents...</span>
                 <span class="message-time">live</span>
             </div>
-            <div class="message-body" style="opacity:0.5;font-size:0.82rem;">
+            <div class="message-body" id="thinkingProgress" style="font-size:0.8rem;line-height:1.8;">
                 <div class="typing-indicator" style="display:inline-flex;gap:4px;vertical-align:middle;">
                     <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
                 </div>
-                <span style="margin-left:8px;color:#64748b;font-size:0.75rem;">See Agent Insights panel → for details</span>
+                <div id="progressLines" style="margin-top:6px;color:#94a3b8;font-size:0.75rem;"></div>
             </div>
         </div>`;
     chatMessages.appendChild(div);
@@ -471,6 +508,16 @@ function showThinkingBar() {
 function updateThinkingBar(el, text) {
     const label = el.querySelector('#thinkingLabel');
     if (label) label.textContent = text;
+}
+
+function addProgressLine(el, html) {
+    const container = el.querySelector('#progressLines');
+    if (!container) return;
+    const line = document.createElement('div');
+    line.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04);';
+    line.innerHTML = html;
+    container.appendChild(line);
+    scrollToBottom();
 }
 
 function setSendBtnLoading(loading) {
