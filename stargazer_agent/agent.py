@@ -70,12 +70,13 @@ maps_tools = [maps_toolset] if maps_toolset else []
 
 
 # ─────────────────────────────────────────────
-# STATE SAVER TOOL
+# STATE SAVER TOOL — forces transfer to workflow
 # ─────────────────────────────────────────────
 def save_user_request(tool_context: ToolContext, request: str, user_location: str = "") -> dict:
     """
-    Saves the user's stargazing request and location to shared state.
-    Called by the greeter before handing off to sub-agents.
+    Saves the user's stargazing request and location to shared state,
+    then FORCES transfer to the stargazer_workflow agent.
+    This tool MUST be called for ANY space observation request.
     request: the user's full intent e.g. 'I want to see the ISS tonight from Mumbai'
     user_location: city or 'lat,lon' e.g. 'mumbai' or '19.07,72.88'
     """
@@ -84,7 +85,14 @@ def save_user_request(tool_context: ToolContext, request: str, user_location: st
     tool_context.state["USER_ID"] = "user_001"
     tool_context.state["WEATHER_STATUS"] = "PENDING"
     logging.info(f"[State] Request saved: {request} | Location: {user_location}")
-    return {"status": "saved", "request": request, "location": user_location}
+
+    # FORCE transfer to the workflow agent — this is the key fix.
+    # Without this, the LLM decides on its own whether to transfer,
+    # and it often answers from general knowledge instead.
+    tool_context.actions.transfer_to_agent = "stargazer_workflow"
+    logging.info("[Transfer] Forced transfer to stargazer_workflow")
+
+    return {"status": "saved", "request": request, "location": user_location, "transferring_to": "stargazer_workflow"}
 
 
 # ─────────────────────────────────────────────
@@ -254,37 +262,38 @@ stargazer_workflow = SequentialAgent(
 root_agent = Agent(
     name="stargazer_greeter",
     model=MODEL,
-    description="StarGazer Mission Control — your AI assistant for space observation planning.",
+    description="StarGazer Mission Control — routes ALL space observation requests to sub-agents.",
     instruction="""
-    You are StarGazer Mission Control 🌌 — an intelligent space observation assistant.
+    You are StarGazer Mission Control 🌌.
 
-    CRITICAL RULE: You MUST NEVER answer questions about ISS location, ISS passes,
-    rocket launches, celestial events, moon phases, or asteroids from your own knowledge.
-    You MUST ALWAYS use the tools and sub-agents for these. If someone asks "where is the ISS"
-    or "I want to see the ISS from Mumbai", you MUST NOT answer from general knowledge.
-    You MUST call save_user_request and then transfer to stargazer_workflow.
+    YOUR ONLY JOB: For ANY space-related request, call save_user_request. That's it.
+    The tool will automatically transfer to the specialized agents that have the real data.
 
-    When a user first connects:
-    - Greet them warmly with the StarGazer menu:
-      🛰️ ISS real-time tracking and visible pass predictions
-      🚀 Upcoming rocket launches (SpaceX, ISRO, NASA Artemis, all providers)
-      🌠 Meteor showers, eclipses, and full moons
-      🌤️ Weather GO/NO-GO for your location
-      🗺️ Nearest dark sky observation spot via Google Maps
-      📅 Google Calendar event with your Mission Brief
+    RULE 1: If the user mentions ANY of these → ALWAYS call save_user_request:
+    - ISS, space station, satellite
+    - Rocket launch, SpaceX, ISRO, NASA, Artemis
+    - Moon, full moon, eclipse, lunar
+    - Meteor, shooting star, meteor shower
+    - Stars, stargazing, constellation, planets
+    - Asteroid, comet, near-earth object
+    - Space event, observation, dark sky
+    - NASA, APOD, astronomy picture
+    - Weather for observation
+    - ANY request that involves observing something in the sky
 
-    - Ask: "What do you want to observe, and what city are you in?"
+    RULE 2: Extract the city/location from their message. If they don't mention one, ask.
 
-    When they reply with ANY space observation request:
-    1. ALWAYS call save_user_request(request=<their full message>, user_location=<city they mentioned>)
-    2. ALWAYS transfer control to 'stargazer_workflow' immediately after.
-    3. Do NOT provide any space data yourself — the sub-agents do that with live APIs.
+    RULE 3: Call save_user_request(request="<their full message>", user_location="<city>")
+    The tool handles everything else — you do NOT need to answer the question yourself.
 
-    Only answer from your own knowledge for truly general questions like:
-    "What is a black hole?" or "How big is the sun?" — NOT anything about current
-    positions, upcoming events, passes, or observation planning.
+    RULE 4: Only if they ask a truly general science question ("what is a black hole?",
+    "how far is Mars?") with NO observation/tracking intent — then answer directly.
 
-    Always be enthusiastic, use space emojis 🚀🌙⭐🔭, and make the user excited!
+    When a user first connects with no request, greet them:
+    "Welcome to StarGazer Mission Control 🌌! I can help you:
+    🛰️ Track the ISS | 🚀 Launches | 🌠 Meteor showers | 🌑 Eclipses
+    🌤️ Weather GO/NO-GO | 🗺️ Dark sky spots | 📅 Calendar events
+    What do you want to observe, and what city are you in?"
     """,
     tools=[save_user_request],
     sub_agents=[stargazer_workflow]
