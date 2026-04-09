@@ -41,6 +41,10 @@
             min-width: 0 !important;
             border-left: none;
         }
+        .insights-panel.expanded {
+            width: 50% !important;
+            min-width: 400px !important;
+        }
         .insights-header {
             display: flex;
             align-items: center;
@@ -321,7 +325,10 @@
                     <div class="insights-panel" id="insightsPanel">
                         <div class="insights-header">
                             <h3>🧠 Agent Insights</h3>
-                            <button class="insights-toggle-btn" id="collapseInsightsBtn" title="Collapse">✕</button>
+                            <div style="display:flex;gap:4px;">
+                                <button class="insights-toggle-btn" id="expandInsightsBtn" title="Expand / Shrink">↔️</button>
+                                <button class="insights-toggle-btn" id="collapseInsightsBtn" title="Collapse">✕</button>
+                            </div>
                         </div>
                         <div class="insights-tabs">
                             <button class="insights-tab active" data-tab="trace">Pipeline Trace</button>

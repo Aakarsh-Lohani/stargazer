@@ -146,6 +146,15 @@ function initInsightsPanel() {
             insightsPanel.classList.toggle('collapsed', !state.insightsVisible);
         });
     }
+
+    // ↔️ Expand / Shrink button
+    const expandBtn = document.getElementById('expandInsightsBtn');
+    if (expandBtn) {
+        expandBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            insightsPanel.classList.toggle('expanded');
+        });
+    }
 }
 
 // Start a new trace block in the Insights panel for this turn
@@ -343,20 +352,35 @@ async function sendMessage(message) {
             }
         }
 
-        thinkingEl.remove();
+        // Don't remove thinkingEl — just collapse the typing dots and mark as done
+        const typingDots = thinkingEl.querySelector('.typing-indicator');
+        if (typingDots) typingDots.style.display = 'none';
 
         if (finalResponse) {
+            // Add a completion line to the progress widget
+            addProgressLine(thinkingEl, `<span style="color:#34d399;font-weight:600">✓ Mission brief ready</span>`);
+            // Update header to show completed
+            updateThinkingBar(thinkingEl, '✅ Pipeline Complete');
+            // Change avatar to show completion
+            const avatar = thinkingEl.querySelector('.message-avatar');
+            if (avatar) avatar.textContent = '✅';
+
             appendMessage('agent', finalResponse);
             parseResponseForDashboard(finalResponse);
-            // Mark trace as complete
             appendTraceEntry(`${tsLabel()}<span style="color:#34d399;font-weight:600">✓ Final response delivered</span>`);
         } else {
+            addProgressLine(thinkingEl, `<span style="color:#fbbf24">⚠️ No response received</span>`);
+            updateThinkingBar(thinkingEl, '⚠️ No Response');
             appendMessage('agent', '⚠️ No response received. The agent may still be initializing — try again.');
         }
         updateAgentStatus('Online', 'active');
 
     } catch (err) {
-        thinkingEl.remove();
+        const typingDots2 = thinkingEl.querySelector('.typing-indicator');
+        if (typingDots2) typingDots2.style.display = 'none';
+        updateThinkingBar(thinkingEl, '❌ Error');
+        addProgressLine(thinkingEl, `<span style="color:#f87171">❌ ${escapeHtml(err.message || String(err))}</span>`);
+
         const errMsg = err.message || String(err);
         appendMessage('agent', `⚠️ Connection error: ${errMsg}`);
         appendTraceEntry(`${tsLabel()}<span class="trace-tool-err">✗ ${escapeHtml(errMsg)}</span>`);
