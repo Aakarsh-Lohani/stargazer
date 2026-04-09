@@ -155,6 +155,15 @@ async def serve_ui():
     return HTMLResponse("<h1>🌌 StarGazer API is running!</h1><p>UI files not found in /static/</p>")
 
 
+@app.get("/debug", response_class=HTMLResponse)
+async def serve_debug_page():
+    """Serve the styled Debug Console page."""
+    debug_path = os.path.join(os.path.dirname(__file__), "static", "debug.html")
+    if os.path.exists(debug_path):
+        return FileResponse(debug_path)
+    return HTMLResponse("<h1>Debug page not found</h1>")
+
+
 @app.get("/health")
 async def health_check():
     """Health check for Cloud Run."""

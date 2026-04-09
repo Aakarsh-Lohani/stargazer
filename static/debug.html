@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StarGazer — Debug Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0a1e;
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 24px;
+        }
+        .header {
+            display: flex; align-items: center; gap: 16px;
+            margin-bottom: 28px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(124,58,237,0.3);
+        }
+        .header h1 {
+            font-size: 1.6rem;
+            background: linear-gradient(135deg, #a78bfa, #818cf8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .header .back-link {
+            color: #a78bfa; text-decoration: none; font-size: 0.85rem;
+            padding: 6px 14px; border: 1px solid rgba(124,58,237,0.3);
+            border-radius: 8px; transition: all 0.2s;
+        }
+        .header .back-link:hover { background: rgba(124,58,237,0.15); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; }
+
+        .card {
+            background: rgba(15, 15, 40, 0.8);
+            border: 1px solid rgba(124,58,237,0.2);
+            border-radius: 14px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+        }
+        .card-header {
+            padding: 14px 18px;
+            background: rgba(124,58,237,0.1);
+            border-bottom: 1px solid rgba(124,58,237,0.15);
+            font-weight: 600; font-size: 0.82rem; letter-spacing: 0.06em;
+            text-transform: uppercase; color: #a78bfa;
+        }
+        .card-body { padding: 16px 18px; font-size: 0.85rem; line-height: 1.8; }
+
+        .status-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { color: #94a3b8; font-size: 0.8rem; }
+        .status-value { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; }
+        .status-ok { color: #34d399; }
+        .status-err { color: #f87171; }
+        .status-warn { color: #fbbf24; }
+
+        .agent-tree { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 2; color: #94a3b8; }
+        .agent-tree .agent-name { color: #a78bfa; font-weight: 500; }
+        .agent-tree .tool-list { color: #60a5fa; font-size: 0.72rem; }
+
+        .feature-list { list-style: none; }
+        .feature-list li { padding: 4px 0; font-size: 0.8rem; color: #cbd5e1; display: flex; align-items: center; gap: 8px; }
+        .feature-list li::before { content: "✅"; }
+
+        .bq-command {
+            background: rgba(0,0,0,0.4); border-radius: 8px;
+            padding: 12px; font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem; color: #34d399; word-break: break-all;
+            margin-top: 8px; border: 1px solid rgba(52,211,153,0.2);
+        }
+
+        .refresh-btn {
+            margin-top: 20px; padding: 10px 24px;
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            color: white; border: none; border-radius: 10px; cursor: pointer;
+            font-size: 0.85rem; font-weight: 500; transition: all 0.2s;
+        }
+        .refresh-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,58,237,0.4); }
+
+        #loadingState { text-align: center; padding: 40px; color: #64748b; }
+        .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid rgba(124,58,237,0.2); border-top-color: #a78bfa; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span style="font-size:1.8rem">🔧</span>
+        <h1>StarGazer Debug Console</h1>
+        <span style="flex:1"></span>
+        <a href="/" class="back-link">← Back to Mission Control</a>
+    </div>
+
+    <div id="loadingState">
+        <div class="spinner"></div>
+        <div>Loading debug data...</div>
+    </div>
+
+    <div class="grid" id="debugGrid" style="display:none">
+        <!-- System Status Card -->
+        <div class="card">
+            <div class="card-header">⚡ System Status</div>
+            <div class="card-body">
+                <div class="status-row">
+                    <span class="status-label">Model</span>
+                    <span class="status-value" id="modelName">—</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">ADK Runner</span>
+                    <span class="status-value" id="runnerStatus">—</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">BigQuery pipeline_log</span>
+                    <span class="status-value" id="bqStatus">—</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Health Endpoint</span>
+                    <span class="status-value" id="healthStatus">—</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Stream Endpoint</span>
+                    <span class="status-value" id="streamStatus">—</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Architecture Card -->
+        <div class="card">
+            <div class="card-header">🤖 Agent Architecture</div>
+            <div class="card-body">
+                <div class="agent-tree">
+                    <span class="agent-name">🌌 stargazer_greeter</span> <span style="color:#475569">(root_agent)</span><br>
+                    &nbsp;&nbsp;├─ 🔧 save_user_request <span style="color:#475569">→ forces transfer</span><br>
+                    &nbsp;&nbsp;└─ <span class="agent-name">⚙️ stargazer_workflow</span> <span style="color:#475569">(SequentialAgent)</span><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ <span class="agent-name">🛰️ orbital_agent</span><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;<span class="tool-list">get_iss_current_position, get_iss_passes_for_location,<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;get_upcoming_launches, get_space_events, get_moon_phases,<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;get_nasa_apod, get_near_earth_objects, get_celestial_events,<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;cache_space_events_to_bq</span><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├─ <span class="agent-name">🌤️ weather_agent</span><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;<span class="tool-list">check_weather_for_observation, find_clear_window_nearby_days</span><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ <span class="agent-name">🗺️ logistics_agent</span><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="tool-list">Google Maps MCP, create_stargazing_calendar_event,<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;list_upcoming_stargazer_events, log_event_to_bq</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Card -->
+        <div class="card">
+            <div class="card-header">🚀 Available Features</div>
+            <div class="card-body">
+                <ul class="feature-list">
+                    <li>ISS real-time tracking (WhereTheISS.at)</li>
+                    <li>ISS visual passes (N2YO)</li>
+                    <li>Rocket launches (Launch Library 2)</li>
+                    <li>Space events (The Space Devs)</li>
+                    <li>Moon phases (US Naval Observatory)</li>
+                    <li>NASA Astronomy Picture of the Day</li>
+                    <li>Near-Earth asteroids (NASA NeoWs)</li>
+                    <li>Celestial events aggregator</li>
+                    <li>Weather GO/NO-GO (OpenWeatherMap)</li>
+                    <li>Clear window finder (5-day forecast)</li>
+                    <li>Dark sky discovery (Google Maps MCP)</li>
+                    <li>Calendar scheduling (Google Calendar)</li>
+                    <li>BigQuery audit logging</li>
+                    <li>Live Agent Insights panel (SSE streaming)</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- BQ Fix Card -->
+        <div class="card" id="bqFixCard" style="display:none">
+            <div class="card-header">🗄️ Fix BigQuery Table</div>
+            <div class="card-body">
+                <p style="color:#fbbf24;margin-bottom:8px">The pipeline_log table doesn't exist. Run this in Cloud Shell:</p>
+                <div class="bq-command" id="bqFixCommand"></div>
+            </div>
+        </div>
+
+        <!-- Dev UI Card -->
+        <div class="card">
+            <div class="card-header">🧪 Default ADK Dev UI</div>
+            <div class="card-body">
+                <p style="color:#94a3b8;margin-bottom:10px">The default ADK dev UI (with full debug tools, event replay, state inspector) runs as a separate local server:</p>
+                <div class="bq-command">cd stargazer && adk web stargazer_agent<br><br># Opens at http://localhost:8000</div>
+                <p style="color:#475569;font-size:0.75rem;margin-top:10px">
+                    Note: The ADK dev UI is an Angular app that cannot be embedded in our custom UI.
+                    Our Agent Insights panel replicates the same data via SSE streaming.
+                </p>
+            </div>
+        </div>
+
+        <!-- API Endpoints Card -->
+        <div class="card">
+            <div class="card-header">🔗 API Endpoints</div>
+            <div class="card-body">
+                <div class="status-row">
+                    <span class="status-label">GET /</span>
+                    <span class="status-value" style="color:#34d399">Custom UI</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">POST /api/stream</span>
+                    <span class="status-value" style="color:#34d399">SSE streaming chat</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">POST /api/chat</span>
+                    <span class="status-value" style="color:#34d399">Sync chat</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">GET /api/pipeline-log</span>
+                    <span class="status-value" style="color:#34d399">BQ log query</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">GET /api/debug</span>
+                    <span class="status-value" style="color:#34d399">This page (JSON)</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">GET /health</span>
+                    <span class="status-value" style="color:#34d399">Cloud Run health check</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">POST /api/session/new</span>
+                    <span class="status-value" style="color:#34d399">Create session</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="text-align:center;margin-top:24px">
+        <button class="refresh-btn" onclick="loadDebug()">↻ Refresh Debug Data</button>
+        <a href="/api/debug" target="_blank" class="refresh-btn" style="text-decoration:none;display:inline-block;margin-left:10px;background:rgba(124,58,237,0.2);border:1px solid rgba(124,58,237,0.3)">
+            📋 View Raw JSON
+        </a>
+    </div>
+
+    <script>
+        async function loadDebug() {
+            const loading = document.getElementById('loadingState');
+            const grid = document.getElementById('debugGrid');
+            loading.style.display = 'block';
+            grid.style.display = 'none';
+
+            try {
+                // Fetch debug API
+                const resp = await fetch('/api/debug');
+                const data = await resp.json();
+
+                document.getElementById('modelName').textContent = data.model || '—';
+                document.getElementById('modelName').className = 'status-value status-ok';
+
+                const runnerEl = document.getElementById('runnerStatus');
+                runnerEl.textContent = data.runner_ready ? 'Ready ✓' : 'NOT READY ✗';
+                runnerEl.className = `status-value ${data.runner_ready ? 'status-ok' : 'status-err'}`;
+
+                const bqEl = document.getElementById('bqStatus');
+                const bqOk = (data.bigquery_status || '').includes('EXISTS');
+                bqEl.textContent = bqOk ? 'EXISTS ✓' : 'NOT FOUND ✗';
+                bqEl.className = `status-value ${bqOk ? 'status-ok' : 'status-err'}`;
+
+                // Show fix card if BQ is missing
+                if (!bqOk) {
+                    const fixCard = document.getElementById('bqFixCard');
+                    fixCard.style.display = 'block';
+                    document.getElementById('bqFixCommand').textContent =
+                        'bq mk --table $PROJECT_ID:stargazer_db.pipeline_log ' +
+                        'session_id:STRING,user_message:STRING,event_type:STRING,' +
+                        'agent_name:STRING,tool_name:STRING,tool_args:STRING,' +
+                        'tool_result_preview:STRING,thinking_text:STRING,created_at:TIMESTAMP';
+                }
+
+                // Check health
+                try {
+                    const hResp = await fetch('/health');
+                    const hData = await hResp.json();
+                    const hEl = document.getElementById('healthStatus');
+                    hEl.textContent = hData.status === 'healthy' ? 'Healthy ✓' : 'Unhealthy ✗';
+                    hEl.className = `status-value ${hData.status === 'healthy' ? 'status-ok' : 'status-err'}`;
+                } catch { document.getElementById('healthStatus').textContent = 'Error'; }
+
+                document.getElementById('streamStatus').textContent = 'Available ✓';
+                document.getElementById('streamStatus').className = 'status-value status-ok';
+
+            } catch (err) {
+                loading.innerHTML = `<div style="color:#f87171">Failed to load: ${err.message}</div>`;
+                return;
+            }
+
+            loading.style.display = 'none';
+            grid.style.display = 'grid';
+        }
+
+        loadDebug();
+    </script>
+</body>
+</html>

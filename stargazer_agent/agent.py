@@ -70,7 +70,7 @@ maps_tools = [maps_toolset] if maps_toolset else []
 
 
 # ─────────────────────────────────────────────
-# STATE SAVER TOOL — forces transfer to workflow
+# STATE SAVER TOOL — forces transfer to workflow (with loop guard)
 # ─────────────────────────────────────────────
 def save_user_request(tool_context: ToolContext, request: str, user_location: str = "") -> dict:
     """
@@ -80,15 +80,26 @@ def save_user_request(tool_context: ToolContext, request: str, user_location: st
     request: the user's full intent e.g. 'I want to see the ISS tonight from Mumbai'
     user_location: city or 'lat,lon' e.g. 'mumbai' or '19.07,72.88'
     """
+    # RE-ENTRY GUARD: If the workflow already ran (ORBITAL_DATA or MISSION_BRIEF exist),
+    # do NOT transfer again. This prevents the infinite loop where:
+    # greeter → workflow → greeter → workflow → ... → session dies
+    if tool_context.state.get("ORBITAL_DATA") or tool_context.state.get("MISSION_BRIEF"):
+        logging.info("[Guard] Workflow already completed. NOT re-transferring.")
+        return {
+            "status": "already_completed",
+            "message": "The workflow already ran. Present the results from ORBITAL_DATA, WEATHER_DATA, and MISSION_BRIEF to the user.",
+            "orbital_data_exists": bool(tool_context.state.get("ORBITAL_DATA")),
+            "weather_data_exists": bool(tool_context.state.get("WEATHER_DATA")),
+            "mission_brief_exists": bool(tool_context.state.get("MISSION_BRIEF")),
+        }
+
     tool_context.state["USER_REQUEST"] = request
     tool_context.state["USER_LOCATION"] = user_location
     tool_context.state["USER_ID"] = "user_001"
     tool_context.state["WEATHER_STATUS"] = "PENDING"
     logging.info(f"[State] Request saved: {request} | Location: {user_location}")
 
-    # FORCE transfer to the workflow agent — this is the key fix.
-    # Without this, the LLM decides on its own whether to transfer,
-    # and it often answers from general knowledge instead.
+    # FORCE transfer to the workflow agent
     tool_context.actions.transfer_to_agent = "stargazer_workflow"
     logging.info("[Transfer] Forced transfer to stargazer_workflow")
 
@@ -286,7 +297,12 @@ root_agent = Agent(
     RULE 3: Call save_user_request(request="<their full message>", user_location="<city>")
     The tool handles everything else — you do NOT need to answer the question yourself.
 
-    RULE 4: Only if they ask a truly general science question ("what is a black hole?",
+    RULE 4: If save_user_request returns status='already_completed', it means the workflow
+    has already run for this request. DO NOT call save_user_request again. Instead, present
+    the results that are already in session state (ORBITAL_DATA, WEATHER_DATA, MISSION_BRIEF)
+    as a friendly summary to the user.
+
+    RULE 5: Only if they ask a truly general science question ("what is a black hole?",
     "how far is Mars?") with NO observation/tracking intent — then answer directly.
 
     When a user first connects with no request, greet them:
