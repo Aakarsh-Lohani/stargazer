@@ -169,6 +169,30 @@
         }
         .insights-toggle-btn:hover { background: rgba(124,58,237,0.15); }
 
+        /* Flow Diagram CSS */
+        .flow-node.active {
+            border-color: #34d399 !important;
+            color: #34d399 !important;
+            box-shadow: 0 0 12px rgba(52, 211, 153, 0.4);
+            background: rgba(52, 211, 153, 0.1) !important;
+            font-weight: 600;
+        }
+        .flow-node.completed {
+            border-color: #a78bfa !important;
+            color: #a78bfa !important;
+        }
+        .flow-arrow.active {
+            border-left: 2px dashed #34d399 !important;
+            animation: pulse-flow 1s ease-in-out infinite;
+        }
+        .flow-arrow.completed {
+            border-left: 2px solid #a78bfa !important;
+        }
+        @keyframes pulse-flow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
         /* Responsive */
         @media (max-width: 900px) {
             .insights-panel { width: 260px; min-width: 220px; }
@@ -214,27 +238,37 @@
                 </button>
             </nav>
 
-            <div class="sidebar-status">
-                <div class="status-card" id="issStatusCard">
-                    <div class="status-label">ISS Status</div>
-                    <div class="status-value" id="issStatus">
-                        <span class="status-dot active"></span>
-                        Tracking
+            <div class="sidebar-status" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: none; margin-bottom: 20px;">
+                <div class="status-card" id="issStatusCard" style="padding: 8px 10px;">
+                    <div class="status-label" style="font-size: 0.55rem; margin-bottom: 2px;">ISS Status</div>
+                    <div class="status-value" id="issStatus" style="font-size: 0.7rem;">
+                        <span class="status-dot active"></span> Tracking
                     </div>
                 </div>
-                <div class="status-card" id="weatherStatusCard">
-                    <div class="status-label">Weather</div>
-                    <div class="status-value" id="weatherStatus">
-                        <span class="status-dot pending"></span>
-                        Pending
+                <div class="status-card" id="weatherStatusCard" style="padding: 8px 10px;">
+                    <div class="status-label" style="font-size: 0.55rem; margin-bottom: 2px;">Weather</div>
+                    <div class="status-value" id="weatherStatus" style="font-size: 0.7rem;">
+                        <span class="status-dot pending"></span> Pending
                     </div>
                 </div>
-                <div class="status-card" id="agentStatusCard">
-                    <div class="status-label">Agent</div>
-                    <div class="status-value" id="agentStatus">
-                        <span class="status-dot active"></span>
-                        Online
+                <div class="status-card" id="agentStatusCard" style="grid-column: span 2; padding: 8px 10px;">
+                    <div class="status-label" style="font-size: 0.55rem; margin-bottom: 2px;">Agent</div>
+                    <div class="status-value" id="agentStatus" style="font-size: 0.7rem;">
+                        <span class="status-dot active"></span> Online
                     </div>
+                </div>
+            </div>
+
+            <div class="sidebar-agent-flow" style="margin-bottom: auto; background: rgba(10, 10, 30, 0.5); border: 1px solid rgba(100, 120, 255, 0.1); border-radius: 12px; padding: 16px 10px;">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 12px; text-align: center;">Pipeline Flow</div>
+                <div class="flow-container" style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                    <div class="flow-node" data-agent="stargazer_greeter" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🌌 Greeter</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="orbital_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🛰️ Orbital</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="weather_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🌤️ Weather</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="logistics_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🗺️ Logistics</div>
                 </div>
             </div>
 

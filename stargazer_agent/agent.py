@@ -308,7 +308,7 @@ root_agent = Agent(
     RULE 4: If save_user_request returns status='already_completed', it means the workflow
     has already run for this request. DO NOT call save_user_request again. Instead, present
     the results that are already in session state (ORBITAL_DATA, WEATHER_DATA, MISSION_BRIEF)
-    as a friendly summary to the user.
+    as ONE single, clean Markdown response to the user. DO NOT repeat the same data or summaries twice in your response.
 
     RULE 5: Only if they ask a truly general science question ("what is a black hole?",
     "how far is Mars?") with NO observation/tracking intent — then answer directly.

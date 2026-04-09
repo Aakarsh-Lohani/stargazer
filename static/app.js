@@ -368,6 +368,9 @@ async function sendMessage(message) {
             appendMessage('agent', finalResponse);
             parseResponseForDashboard(finalResponse);
             appendTraceEntry(`${tsLabel()}<span style="color:#34d399;font-weight:600">✓ Final response delivered</span>`);
+            
+            // Mark pipeline complete in sidebar flow UI
+            if (typeof updateAgentFlowUI === 'function') updateAgentFlowUI('completed_all');
         } else {
             addProgressLine(thinkingEl, `<span style="color:#fbbf24">⚠️ No response received</span>`);
             updateThinkingBar(thinkingEl, '⚠️ No Response');
@@ -436,6 +439,9 @@ function processStreamEvent(evt, thinkingEl) {
         // Chat progress
         const label = AGENT_LABELS[evt.agent] || `${icon} ${evt.agent} activated`;
         addProgressLine(thinkingEl, `<span style="color:#a78bfa">${icon} ${label}</span>`);
+
+        // Update sidebar UI flow diagram
+        if (typeof updateAgentFlowUI === 'function') updateAgentFlowUI(evt.agent);
     }
 
     // ── Agent transfer ──
@@ -579,9 +585,9 @@ function formatContent(text) {
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
     html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-    html = html.replace(/\b(GO)\b(?![\-\w])/g, '<span class="go-status go">✅ GO</span>');
-    html = html.replace(/\bNO-GO\b/g, '<span class="go-status nogo">❌ NO-GO</span>');
-    html = html.replace(/\bMARGINAL\b/g, '<span class="go-status marginal">⚠️ MARGINAL</span>');
+    html = html.replace(/\b(GO)\b(?![\-\w])/g, '<span class="go-status go">GO</span>');
+    html = html.replace(/\bNO-GO\b/g, '<span class="go-status nogo">NO-GO</span>');
+    html = html.replace(/\bMARGINAL\b/g, '<span class="go-status marginal">MARGINAL</span>');
     html = html.split('\n\n').map(p => `<p>${p.replace(/\n/g,'<br>')}</p>`).join('');
     return html;
 }
@@ -640,6 +646,58 @@ function parseResponseForDashboard(response) {
     if (lower.includes('no-go')) updateStatus('weatherStatus', 'NO-GO', 'error');
     else if (lower.includes('marginal')) updateStatus('weatherStatus', 'MARGINAL', 'pending');
     else if (lower.includes(' go') || lower.includes('clear sky')) updateStatus('weatherStatus', 'GO', 'active');
+}
+
+// ─── Agent Flow UI ──────────────────────────────────────────────────
+function updateAgentFlowUI(activeAgentName) {
+    const nodes = document.querySelectorAll('.flow-node');
+    if (!nodes || nodes.length === 0) return;
+    
+    let foundActive = false;
+    nodes.forEach(node => {
+        const agentId = node.dataset.agent;
+        if (activeAgentName === 'completed_all') {
+             node.classList.remove('active');
+             node.classList.add('completed');
+             return;
+        }
+
+        if (agentId === activeAgentName) {
+            node.classList.add('active');
+            node.classList.remove('completed');
+            foundActive = true;
+        } else if (!foundActive) {
+            node.classList.remove('active');
+            node.classList.add('completed');
+        } else {
+            node.classList.remove('active');
+            node.classList.remove('completed');
+        }
+    });
+
+    const arrows = document.querySelectorAll('.flow-arrow');
+    if (activeAgentName === 'completed_all') {
+         arrows.forEach(arrow => {
+             arrow.classList.remove('active');
+             arrow.classList.add('completed');
+         });
+         return;
+    }
+
+    arrows.forEach(arrow => {
+        const prev = arrow.previousElementSibling;
+        const next = arrow.nextElementSibling;
+        if (prev && next) {
+            if ((prev.classList.contains('completed') || prev.classList.contains('active')) && 
+                (next.classList.contains('active') || next.classList.contains('completed'))) {
+                arrow.classList.add('active');
+                arrow.classList.remove('completed');
+            } else {
+                arrow.classList.remove('active');
+                arrow.classList.remove('completed');
+            }
+        }
+    });
 }
 
 
