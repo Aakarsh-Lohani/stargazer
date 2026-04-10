@@ -581,6 +581,18 @@ function appendMessage(role, content) {
 function formatContent(text) {
     if (!text) return '';
     let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    
+    // Parse formatting boxes FIRST, converting newlines to <br> so they stay as solid blocks
+    html = html.replace(/:::reasoning\s*([\s\S]*?):::/g, (match, p1) => {
+        let content = p1.trim().replace(/\n/g, '<br>');
+        return `\n\n<div class="reasoning-panel"><div class="reasoning-header">🧠 Orchestrator Reasoning</div><div class="reasoning-content">${content}</div></div>\n\n`;
+    });
+    
+    html = html.replace(/:::box\s+(\w+)\s*([\s\S]*?):::/g, (match, type, content) => {
+        let cleanContent = content.trim().replace(/\n/g, '<br>');
+        return `\n\n<div class="info-box box-${type}"><div class="box-content">${cleanContent}</div></div>\n\n`;
+    });
+
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -588,7 +600,17 @@ function formatContent(text) {
     html = html.replace(/\b(GO)\b(?![\-\w])/g, '<span class="go-status go">GO</span>');
     html = html.replace(/\bNO-GO\b/g, '<span class="go-status nogo">NO-GO</span>');
     html = html.replace(/\bMARGINAL\b/g, '<span class="go-status marginal">MARGINAL</span>');
-    html = html.split('\n\n').map(p => `<p>${p.replace(/\n/g,'<br>')}</p>`).join('');
+    
+    // Split into paragraphs, preserving our custom divs
+    html = html.split('\n\n').map(p => {
+        let trimmed = p.trim();
+        if (!trimmed) return '';
+        if (trimmed.startsWith('<div class="reasoning-panel"') || trimmed.startsWith('<div class="info-box')) {
+            return trimmed;
+        }
+        return `<p>${trimmed.replace(/\n/g,'<br>')}</p>`;
+    }).join('');
+    
     return html;
 }
 

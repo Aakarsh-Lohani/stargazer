@@ -262,15 +262,30 @@ logistics_agent = Agent(
 
 
 # ─────────────────────────────────────────────
-# SEQUENTIAL WORKFLOW
+# ORCHESTRATOR WORKFLOW
 # ─────────────────────────────────────────────
-stargazer_workflow = SequentialAgent(
+stargazer_workflow = Agent(
     name="stargazer_workflow",
-    description="The full StarGazer pipeline: Orbital → Weather → Logistics",
+    model=MODEL,
+    description="The intelligent StarGazer pipeline orchestrator. Reasons over orbital, weather, and logistics data.",
+    instruction="""
+    You are the StarGazer Pipeline Orchestrator. Your job is to actively manage the pipeline to find a good space observation window for the user.
+
+    STEPS:
+    1. Transfer to `orbital_agent` to fetch space events based on the user's intent.
+    2. Once orbital data is returned, transfer to `weather_agent` to check conditions for the best event.
+    3. REASON: If the weather is NO-GO, transfer back to `orbital_agent` (or use the existing data) to pick an alternative date, and then check `weather_agent` again!
+    4. Once you have a GO or MARGINAL weather status, YOU MUST transfer to `logistics_agent` to secure a dark sky spot and calendar entry.
+    
+    CRITICAL INSTRUCTION: Before you transfer to ANY sub-agent, you MUST explain your reasoning to the user by outputting it in this exact format:
+    :::reasoning
+    I see a Falcon 9 launch coming up; checking the weather for Vandenberg...
+    :::
+    """,
     sub_agents=[
-        orbital_agent,    # Step 1: What events are available?
-        weather_agent,    # Step 2: Is the sky clear?
-        logistics_agent   # Step 3: Book the spot and calendar
+        orbital_agent,
+        weather_agent,
+        logistics_agent
     ]
 )
 
@@ -308,7 +323,24 @@ root_agent = Agent(
     RULE 4: If save_user_request returns status='already_completed', it means the workflow
     has already run for this request. DO NOT call save_user_request again. Instead, present
     the results that are already in session state (ORBITAL_DATA, WEATHER_DATA, MISSION_BRIEF)
-    as ONE single, clean Markdown response to the user. DO NOT repeat the same data or summaries twice in your response.
+    as ONE single, clean formatted response to the user. DO NOT repeat the same data or summaries twice in your response.
+    
+    FORMATTING RULES FOR FINAL RESPONSE:
+    - Do NOT output raw plain text blocks. You must use our UI boxes for clean formatting.
+    - Wrap the final recommended event in:
+      :::box recommended
+      ### [Event Name]
+      [Event Details, Time, Location]
+      :::
+    - Wrap other information (like other celestial events, moon phases) in:
+      :::box info
+      ### [Title]
+      [Details]
+      :::
+    - Wrap any final thoughts or weather briefs in:
+      :::box weather
+      [Weather Details]
+      :::
 
     RULE 5: Only if they ask a truly general science question ("what is a black hole?",
     "how far is Mars?") with NO observation/tracking intent — then answer directly.
