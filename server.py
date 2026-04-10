@@ -88,6 +88,18 @@ async def run_agent_with_retry(user_id, session_id, new_message, max_retries=3):
     raise last_err
 
 
+# ─── Mock ToolContext for direct tool calls outside ADK sessions ──────
+class _MockState(dict):
+    """Dict-backed state that satisfies tool_context.state interface."""
+    pass
+
+class _MockToolContext:
+    """Minimal ToolContext mock so space/weather tools can be called directly
+    from HTTP endpoints without needing a full ADK runner session."""
+    def __init__(self):
+        self.state = _MockState()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize the ADK runner on startup."""
@@ -411,6 +423,47 @@ async def new_session():
         return {"session_id": session_id}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/events")
+async def get_live_events(event_type: str = "ALL", days_ahead: int = 90):
+    """
+    Returns live celestial events aggregated from multiple real APIs:
+    moon phases (USNO), space events (The Space Devs), near-Earth objects (NASA NeoWs).
+    Used by the Events panel to replace hardcoded event cards.
+    Query params: ?event_type=ALL&days_ahead=90
+    """
+    try:
+        from stargazer_agent.tools.space_tools import get_celestial_events
+        ctx = _MockToolContext()
+        data = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: get_celestial_events(ctx, event_type=event_type, days_ahead=days_ahead)
+        )
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.error(f"/api/events error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e), "events": []})
+
+
+@app.get("/api/next-launch")
+async def get_next_launch(limit: int = 3):
+    """
+    Returns the next N upcoming rocket launches from Launch Library 2.
+    Used by the Dashboard panel's Next Launch card to show live data without a chat query.
+    Query params: ?limit=3
+    """
+    try:
+        from stargazer_agent.tools.space_tools import get_upcoming_launches
+        ctx = _MockToolContext()
+        data = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: get_upcoming_launches(ctx, limit=limit)
+        )
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.error(f"/api/next-launch error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e), "launches": []})
 
 
 @app.get("/api/debug")

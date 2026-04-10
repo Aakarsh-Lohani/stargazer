@@ -35,14 +35,4 @@ def get_maps_mcp_toolset():
         return None
 
 
-def get_dark_sky_location_prompt(latitude: float, longitude: float, radius_km: int = 50) -> str:
-    """
-    Returns a structured prompt string for the Maps MCP agent to find dark sky locations.
-    Used by the logistics_agent to formulate its Maps search query.
-    """
-    return (
-        f"Search for dark sky parks, observatories, or rural areas with minimal light pollution "
-        f"within {radius_km} km of coordinates ({latitude}, {longitude}). "
-        f"Include the place name, address, distance, and a Google Maps link. "
-        f"Also check if the location has a clear open horizon (no tall buildings or mountains blocking the sky)."
-    )
+

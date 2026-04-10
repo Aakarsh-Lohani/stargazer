@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from google.adk import Agent
-from google.adk.agents import SequentialAgent
+# SequentialAgent imported but not used — we use LLM-orchestrated Agent for retry loop capability
 from google.adk.tools.tool_context import ToolContext
 
 MODEL = os.getenv("MODEL", "gemini-2.0-flash-001")
@@ -262,25 +262,74 @@ logistics_agent = Agent(
 
 
 # ─────────────────────────────────────────────
-# ORCHESTRATOR WORKFLOW
+# ORCHESTRATOR WORKFLOW — LLM-driven with retry loop
+# Uses Agent (not SequentialAgent) so the LLM can:
+#   - Re-call orbital_agent to find alternative dates when weather is NO-GO
+#   - Iterate weather + orbital multiple times until a GO/MARGINAL window is found
+#   - Only proceed to logistics_agent when conditions are acceptable
 # ─────────────────────────────────────────────
 stargazer_workflow = Agent(
     name="stargazer_workflow",
     model=MODEL,
-    description="The intelligent StarGazer pipeline orchestrator. Reasons over orbital, weather, and logistics data.",
+    description="The intelligent StarGazer pipeline orchestrator. Uses a ReAct-style retry loop to find the best possible observation window — re-running orbital and weather agents until conditions are GO or MARGINAL.",
     instruction="""
-    You are the StarGazer Pipeline Orchestrator. Your job is to actively manage the pipeline to find a good space observation window for the user.
+    You are the StarGazer Pipeline Orchestrator. Your role is to ACTIVELY MANAGE the pipeline
+    and iterate until you find a valid observation window for the user. You are NOT a simple
+    sequential pipeline — you have full control to loop and retry.
 
-    STEPS:
-    1. Transfer to `orbital_agent` to fetch space events based on the user's intent.
-    2. Once orbital data is returned, transfer to `weather_agent` to check conditions for the best event.
-    3. REASON: If the weather is NO-GO, transfer back to `orbital_agent` (or use the existing data) to pick an alternative date, and then check `weather_agent` again!
-    4. Once you have a GO or MARGINAL weather status, YOU MUST transfer to `logistics_agent` to secure a dark sky spot and calendar entry.
-    
-    CRITICAL INSTRUCTION: Before you transfer to ANY sub-agent, you MUST explain your reasoning to the user by outputting it in this exact format:
+    ═══ PIPELINE LOGIC (FOLLOW EXACTLY) ═══
+
+    CYCLE START:
+    Step 1 — ORBITAL FETCH:
+       Transfer to `orbital_agent` with the user's intent from USER_REQUEST and
+       USER_LOCATION. Ask it to find the BEST upcoming space event/observation window.
+       If this is a RETRY cycle (weather was NO-GO), tell orbital_agent specifically:
+       "The previous event time had bad weather. Please find ALTERNATIVE dates or event
+       times at least 24-48 hours different from the previous suggestion."
+
+    Step 2 — WEATHER CHECK:
+       Once ORBITAL_DATA is set, transfer to `weather_agent` to check conditions
+       at the specific event time and location in ORBITAL_DATA.
+
+    Step 3 — EVALUATE RESULT (critical decision point):
+       Read WEATHER_DATA status:
+
+       A) If status is GO or MARGINAL:
+          → Proceed to Step 4 (logistics).
+
+       B) If status is NO-GO AND this is the 1st attempt:
+          → Output reasoning explaining why you are retrying with a different date.
+          → Go back to Step 1 (RETRY cycle — ask orbital_agent for alternative times).
+          → This gives the user a better window instead of giving up.
+
+       C) If status is NO-GO after 2nd retry:
+          → Skip logistics. Tell the user there are no clear windows in the near future
+            and provide the best alternative dates found so far.
+
+    Step 4 — LOGISTICS:
+       Transfer to `logistics_agent` to find a dark sky observation location via Google
+       Maps MCP and create a Google Calendar event with the mission brief.
+
+    ═══ MANDATORY REASONING FORMAT ═══
+    Before transferring to ANY sub-agent, output your reasoning like this:
     :::reasoning
-    I see a Falcon 9 launch coming up; checking the weather for Vandenberg...
+    [Explain what you are doing and why — e.g., "Weather over Mumbai is NO-GO (87% cloud
+    cover). Asking orbital_agent to find an alternative ISS pass 2 days later."]
     :::
+
+    ═══ RETRY EXAMPLE ═══
+    User: "ISS tonight from Delhi"
+    → You: :::reasoning Fetching ISS passes and space data for Delhi. :::  → orbital_agent
+    → orbital_agent returns: ISS pass at 21:30 UTC tonight
+    → You: :::reasoning Checking weather for Delhi at 21:30 UTC. ::: → weather_agent
+    → weather_agent returns: NO-GO (92% cloud cover, heavy monsoon)
+    → You: :::reasoning Tonight is NO-GO. Asking orbital_agent for an alternative ISS pass
+      over the next 5 days when weather might be clearer. ::: → orbital_agent (retry)
+    → orbital_agent returns: ISS pass at 20:15 UTC in 3 days
+    → You: :::reasoning Checking weather for Delhi in 3 days. ::: → weather_agent
+    → weather_agent returns: GO (18% cloud cover)
+    → You: :::reasoning Found a GO window! Getting dark sky location and booking calendar. :::
+      → logistics_agent
     """,
     sub_agents=[
         orbital_agent,

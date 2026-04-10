@@ -259,16 +259,16 @@
                 </div>
             </div>
 
-            <div class="sidebar-agent-flow" style="margin-bottom: auto; background: rgba(10, 10, 30, 0.5); border: 1px solid rgba(100, 120, 255, 0.1); border-radius: 12px; padding: 16px 10px;">
-                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 12px; text-align: center;">Pipeline Flow</div>
-                <div class="flow-container" style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                    <div class="flow-node" data-agent="stargazer_greeter" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🌌 Greeter</div>
-                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
-                    <div class="flow-node" data-agent="orbital_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🛰️ Orbital</div>
-                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
-                    <div class="flow-node" data-agent="weather_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🌤️ Weather</div>
-                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
-                    <div class="flow-node" data-agent="logistics_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🗺️ Logistics</div>
+            <div class="sidebar-agent-flow" style="margin-bottom: auto; background: rgba(10, 10, 30, 0.5); border: 1px solid rgba(100, 120, 255, 0.1); border-radius: 12px; padding: 12px 8px; overflow: hidden;">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 8px; text-align: center;">Live Pipeline</div>
+                <!-- Dynamic directed graph — built by PipelineGraph class in app.js -->
+                <div id="pipelineGraphSvg"
+                     style="width:100%;overflow-x:hidden;overflow-y:auto;max-height:320px;display:flex;justify-content:center;">
+                    <!-- Empty state -->
+                    <div id="pipelineEmpty" style="text-align:center;padding:24px 8px;color:#334155;font-size:0.72rem;font-family:'Inter',sans-serif;">
+                        <div style="font-size:1.6rem;margin-bottom:8px;">🔭</div>
+                        Send a message to see the live agent pipeline graph here.
+                    </div>
                 </div>
             </div>
 
@@ -467,61 +467,18 @@
                         <h2>🌠 Upcoming Events</h2>
                     </div>
                 </div>
-                <div class="events-grid" id="eventsGrid">
-                    <div class="event-card meteor">
-                        <div class="event-icon">☄️</div>
-                        <div class="event-details">
-                            <h4>Perseid Meteor Shower</h4>
-                            <p class="event-date">Aug 12, 2025</p>
-                            <p class="event-desc">Up to 100 meteors/hour. Best viewed after midnight.</p>
-                        </div>
-                        <span class="event-type-badge">Meteor Shower</span>
+                <div id="eventsGrid" class="events-grid">
+                    <!-- Live events loaded from /api/events — no hardcoded data -->
+                    <div id="eventsLoadingState" style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#475569;">
+                        <div style="font-size:2rem;margin-bottom:12px;">🌠</div>
+                        <div style="font-size:0.9rem;color:#64748b;">Loading live space events...</div>
+                        <div style="margin-top:8px;font-size:0.75rem;color:#334155;">Fetching from USNO, The Space Devs & NASA APIs</div>
                     </div>
-                    <div class="event-card eclipse">
-                        <div class="event-icon">🌑</div>
-                        <div class="event-details">
-                            <h4>Total Lunar Eclipse</h4>
-                            <p class="event-date">Sep 7, 2025</p>
-                            <p class="event-desc">Visible from Europe, Africa, Asia. Blood Moon!</p>
-                        </div>
-                        <span class="event-type-badge">Eclipse</span>
-                    </div>
-                    <div class="event-card meteor">
-                        <div class="event-icon">☄️</div>
-                        <div class="event-details">
-                            <h4>Geminid Meteor Shower</h4>
-                            <p class="event-date">Dec 13, 2025</p>
-                            <p class="event-desc">Best annual shower — up to 120 meteors/hour.</p>
-                        </div>
-                        <span class="event-type-badge">Meteor Shower</span>
-                    </div>
-                    <div class="event-card eclipse">
-                        <div class="event-icon">🌑</div>
-                        <div class="event-details">
-                            <h4>Total Lunar Eclipse</h4>
-                            <p class="event-date">Mar 3, 2026</p>
-                            <p class="event-desc">Visible from Americas, Europe, Africa. Blood Moon.</p>
-                        </div>
-                        <span class="event-type-badge">Eclipse</span>
-                    </div>
-                    <div class="event-card moon">
-                        <div class="event-icon">🌕</div>
-                        <div class="event-details">
-                            <h4>Full Moon — Harvest Moon</h4>
-                            <p class="event-date">Sep 7, 2025</p>
-                            <p class="event-desc">September Full Moon — great for photography.</p>
-                        </div>
-                        <span class="event-type-badge">Full Moon</span>
-                    </div>
-                    <div class="event-card meteor">
-                        <div class="event-icon">☄️</div>
-                        <div class="event-details">
-                            <h4>Quadrantid Meteor Shower</h4>
-                            <p class="event-date">Jan 3, 2026</p>
-                            <p class="event-desc">Up to 120 meteors/hour. Brief 6-hour peak window.</p>
-                        </div>
-                        <span class="event-type-badge">Meteor Shower</span>
-                    </div>
+                </div>
+                <div style="text-align:center;margin-top:12px;">
+                    <button id="refreshEventsBtn" style="background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.3);color:#a78bfa;padding:8px 20px;border-radius:20px;font-size:0.8rem;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(124,58,237,0.3)'" onmouseout="this.style.background='rgba(124,58,237,0.15)'">
+                        🔄 Refresh Events
+                    </button>
                 </div>
             </section>
 

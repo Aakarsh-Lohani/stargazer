@@ -10,6 +10,7 @@ const state = {
     activePanel: 'chat',
     insightsVisible: true,
     currentTraceSession: null,
+    pipelineGraph: null,   // PipelineGraph instance
 };
 
 // ─── DOM ─────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initChat();
     initDashboard();
     initInsightsPanel();
+    initPipelineGraph();
     setWelcomeTime();
     initSession();
 });
@@ -79,6 +81,9 @@ function initNavigation() {
             $(`#${panelId}Panel`).classList.add('active');
             state.activePanel = panelId;
             if (window.innerWidth <= 768) sidebar.classList.remove('open');
+            // Auto-load live data when panels are opened
+            if (panelId === 'events') loadLiveEvents();
+            if (panelId === 'dashboard') loadNextLaunch();
         });
     });
 
@@ -317,6 +322,8 @@ async function sendMessage(message) {
     // Show "thinking" in chat as a minimal status indicator
     const thinkingEl = showThinkingBar();
     setSendBtnLoading(true);
+    // Reset pipeline graph for new conversation turn
+    if (state.pipelineGraph) state.pipelineGraph.reset();
 
     try {
         const resp = await fetch('/api/stream', {
@@ -369,8 +376,8 @@ async function sendMessage(message) {
             parseResponseForDashboard(finalResponse);
             appendTraceEntry(`${tsLabel()}<span style="color:#34d399;font-weight:600">✓ Final response delivered</span>`);
             
-            // Mark pipeline complete in sidebar flow UI
-            if (typeof updateAgentFlowUI === 'function') updateAgentFlowUI('completed_all');
+            // Mark last node completed in pipeline graph
+            if (state.pipelineGraph) state.pipelineGraph.markCompleted();
         } else {
             addProgressLine(thinkingEl, `<span style="color:#fbbf24">⚠️ No response received</span>`);
             updateThinkingBar(thinkingEl, '⚠️ No Response');
@@ -440,8 +447,8 @@ function processStreamEvent(evt, thinkingEl) {
         const label = AGENT_LABELS[evt.agent] || `${icon} ${evt.agent} activated`;
         addProgressLine(thinkingEl, `<span style="color:#a78bfa">${icon} ${label}</span>`);
 
-        // Update sidebar UI flow diagram
-        if (typeof updateAgentFlowUI === 'function') updateAgentFlowUI(evt.agent);
+        // Feed agent switch into the live dynamic pipeline graph
+        if (state.pipelineGraph) state.pipelineGraph.addNode(evt.agent);
     }
 
     // ── Agent transfer ──
@@ -670,56 +677,363 @@ function parseResponseForDashboard(response) {
     else if (lower.includes(' go') || lower.includes('clear sky')) updateStatus('weatherStatus', 'GO', 'active');
 }
 
-// ─── Agent Flow UI ──────────────────────────────────────────────────
-function updateAgentFlowUI(activeAgentName) {
-    const nodes = document.querySelectorAll('.flow-node');
-    if (!nodes || nodes.length === 0) return;
-    
-    let foundActive = false;
-    nodes.forEach(node => {
-        const agentId = node.dataset.agent;
-        if (activeAgentName === 'completed_all') {
-             node.classList.remove('active');
-             node.classList.add('completed');
-             return;
-        }
+// ─── Pipeline Graph (replaces static flow diagram) ───────────────────
+function initPipelineGraph() {
+    state.pipelineGraph = new PipelineGraph('pipelineGraphSvg');
+    // Wire refresh button for events panel
+    const refreshBtn = document.getElementById('refreshEventsBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadLiveEvents);
+    // Auto-load events & launch data immediately
+    loadLiveEvents();
+    loadNextLaunch();
+}
 
-        if (agentId === activeAgentName) {
-            node.classList.add('active');
-            node.classList.remove('completed');
-            foundActive = true;
-        } else if (!foundActive) {
-            node.classList.remove('active');
-            node.classList.add('completed');
-        } else {
-            node.classList.remove('active');
-            node.classList.remove('completed');
-        }
-    });
 
-    const arrows = document.querySelectorAll('.flow-arrow');
-    if (activeAgentName === 'completed_all') {
-         arrows.forEach(arrow => {
-             arrow.classList.remove('active');
-             arrow.classList.add('completed');
-         });
-         return;
+/**
+ * PipelineGraph — Real-time directed graph for the sidebar.
+ * Each agent_switch event adds a numbered node. Loops are shown
+ * as extra nodes (e.g., orbital → weather → orbital → weather → logistics).
+ * Renders as inline SVG, updating incrementally.
+ */
+class PipelineGraph {
+    constructor(containerId) {
+        this.containerId = containerId;
+        this.container = document.getElementById(containerId);
+        this.nodes = [];   // [{id, agent, step, status}]
+        this.stepCount = 0;
+
+        // Agent styling config
+        this.AGENT_CFG = {
+            stargazer_greeter:  { bg:'#1e0835', border:'#7c3aed', text:'#c4b5fd', emoji:'🌌', label:'Mission Control' },
+            stargazer_workflow: { bg:'#1e1b4b', border:'#4f46e5', text:'#a5b4fc', emoji:'⚙️', label:'Orchestrator' },
+            orbital_agent:      { bg:'#0c4a6e', border:'#0284c7', text:'#7dd3fc', emoji:'🛰️', label:'Orbital Agent' },
+            weather_agent:      { bg:'#064e3b', border:'#059669', text:'#6ee7b7', emoji:'🌤️', label:'Weather Agent' },
+            logistics_agent:    { bg:'#451a03', border:'#d97706', text:'#fcd34d', emoji:'🗺️', label:'Logistics Agent' },
+        };
     }
 
-    arrows.forEach(arrow => {
-        const prev = arrow.previousElementSibling;
-        const next = arrow.nextElementSibling;
-        if (prev && next) {
-            if ((prev.classList.contains('completed') || prev.classList.contains('active')) && 
-                (next.classList.contains('active') || next.classList.contains('completed'))) {
-                arrow.classList.add('active');
-                arrow.classList.remove('completed');
-            } else {
-                arrow.classList.remove('active');
-                arrow.classList.remove('completed');
-            }
+    _cfg(agent) {
+        return this.AGENT_CFG[agent] || { bg:'#1e293b', border:'#64748b', text:'#94a3b8', emoji:'🤖', label: agent };
+    }
+
+    /** Add a new step node (called on each agent_switch SSE event). */
+    addNode(agent) {
+        // Mark the previously active node as completed
+        this.nodes.forEach(n => { if (n.status === 'active') n.status = 'completed'; });
+
+        this.stepCount++;
+        const node = { id: `n${this.stepCount}`, agent, step: this.stepCount, status: 'active' };
+        this.nodes.push(node);
+        this._render();
+    }
+
+    /** Mark the current active node as completed (pipeline done). */
+    markCompleted() {
+        this.nodes.forEach(n => { if (n.status === 'active') n.status = 'completed'; });
+        this._render();
+    }
+
+    /** Clear graph for a new conversation turn. */
+    reset() {
+        this.nodes = [];
+        this.stepCount = 0;
+        this._render();
+    }
+
+    _render() {
+        if (!this.container) return;
+
+        // Show empty state
+        const emptyEl = document.getElementById('pipelineEmpty');
+        if (this.nodes.length === 0) {
+            if (emptyEl) emptyEl.style.display = 'block';
+            // Clear any old SVG
+            const oldSvg = this.container.querySelector('svg');
+            if (oldSvg) oldSvg.remove();
+            return;
         }
-    });
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        // Layout constants
+        const SVG_W = 240;
+        const NODE_X = 20;          // left margin for step circle
+        const NODE_W = 200;         // rect width
+        const NODE_H = 50;          // rect height
+        const STEP_R = 11;          // step circle radius
+        const ARROW_H = 30;         // height of arrow connector
+        const PAD_TOP = 8;
+
+        const totalH = PAD_TOP + this.nodes.length * (NODE_H + ARROW_H) - ARROW_H + 12;
+
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('width', SVG_W);
+        svg.setAttribute('height', totalH);
+        svg.setAttribute('xmlns', ns);
+
+        // ── Arrow marker defs ──
+        const defs = document.createElementNS(ns, 'defs');
+        const mkArrow = (id, color) => {
+            const m = document.createElementNS(ns, 'marker');
+            m.setAttribute('id', id);
+            m.setAttribute('markerWidth', '8');
+            m.setAttribute('markerHeight', '8');
+            m.setAttribute('refX', '6');
+            m.setAttribute('refY', '3');
+            m.setAttribute('orient', 'auto');
+            const p = document.createElementNS(ns, 'path');
+            p.setAttribute('d', 'M0,0 L0,6 L8,3 z');
+            p.setAttribute('fill', color);
+            m.appendChild(p);
+            return m;
+        };
+        defs.appendChild(mkArrow('arr-done', '#7c3aed'));
+        defs.appendChild(mkArrow('arr-active', '#34d399'));
+        svg.appendChild(defs);
+
+        this.nodes.forEach((node, i) => {
+            const cfg = this._cfg(node.agent);
+            const isActive  = node.status === 'active';
+            const borderClr = isActive ? '#34d399' : cfg.border;
+            const y = PAD_TOP + i * (NODE_H + ARROW_H);
+
+            // ── Step circle (left of node) ──
+            const circle = document.createElementNS(ns, 'circle');
+            circle.setAttribute('cx', NODE_X + STEP_R);
+            circle.setAttribute('cy', y + NODE_H / 2);
+            circle.setAttribute('r', STEP_R);
+            circle.setAttribute('fill', isActive ? '#059669' : cfg.border);
+            circle.setAttribute('opacity', '0.95');
+            svg.appendChild(circle);
+
+            const stepNum = document.createElementNS(ns, 'text');
+            stepNum.setAttribute('x', NODE_X + STEP_R);
+            stepNum.setAttribute('y', y + NODE_H / 2 + 4);
+            stepNum.setAttribute('text-anchor', 'middle');
+            stepNum.setAttribute('fill', 'white');
+            stepNum.setAttribute('font-size', '9.5');
+            stepNum.setAttribute('font-family', "'JetBrains Mono', monospace");
+            stepNum.setAttribute('font-weight', 'bold');
+            stepNum.textContent = node.step;
+            svg.appendChild(stepNum);
+
+            // ── Node rectangle ──
+            const rectX = NODE_X + STEP_R * 2 + 6;
+            const rect = document.createElementNS(ns, 'rect');
+            rect.setAttribute('x', rectX);
+            rect.setAttribute('y', y);
+            rect.setAttribute('width', SVG_W - rectX - 6);
+            rect.setAttribute('height', NODE_H);
+            rect.setAttribute('rx', '8');
+            rect.setAttribute('fill', cfg.bg);
+            rect.setAttribute('stroke', borderClr);
+            rect.setAttribute('stroke-width', isActive ? '2' : '1.5');
+            rect.setAttribute('opacity', '0.96');
+            svg.appendChild(rect);
+
+            // Optional glow for active node
+            if (isActive) {
+                rect.setAttribute('filter', 'drop-shadow(0 0 5px rgba(52,211,153,0.45))');
+            }
+
+            // ── Emoji ──
+            const emojiX = rectX + 10;
+            const emojiEl = document.createElementNS(ns, 'text');
+            emojiEl.setAttribute('x', emojiX);
+            emojiEl.setAttribute('y', y + 20);
+            emojiEl.setAttribute('font-size', '13');
+            emojiEl.textContent = cfg.emoji;
+            svg.appendChild(emojiEl);
+
+            // ── Agent label ──
+            const labelEl = document.createElementNS(ns, 'text');
+            labelEl.setAttribute('x', emojiX + 20);
+            labelEl.setAttribute('y', y + 19);
+            labelEl.setAttribute('fill', cfg.text);
+            labelEl.setAttribute('font-size', '9.5');
+            labelEl.setAttribute('font-family', "'Inter', sans-serif");
+            labelEl.setAttribute('font-weight', '600');
+            labelEl.textContent = cfg.label;
+            svg.appendChild(labelEl);
+
+            // ── Status text ──
+            const statusEl = document.createElementNS(ns, 'text');
+            statusEl.setAttribute('x', emojiX + 20);
+            statusEl.setAttribute('y', y + 33);
+            statusEl.setAttribute('fill', isActive ? '#34d399' : cfg.text);
+            statusEl.setAttribute('font-size', '8');
+            statusEl.setAttribute('font-family', "'Inter', sans-serif");
+            statusEl.setAttribute('opacity', '0.8');
+            statusEl.textContent = isActive ? '● Running' : '✓ Done';
+            svg.appendChild(statusEl);
+
+            // ── Retry badge (shown when same agent appears more than once) ──
+            let prevSameIdx = -1;
+            for (let j = i - 1; j >= 0; j--) { if (this.nodes[j].agent === node.agent) { prevSameIdx = j; break; } }
+            if (prevSameIdx >= 0) {
+                const badge = document.createElementNS(ns, 'rect');
+                const badgeW = 38, badgeH = 13;
+                badge.setAttribute('x', SVG_W - badgeW - 8);
+                badge.setAttribute('y', y + 3);
+                badge.setAttribute('width', badgeW);
+                badge.setAttribute('height', badgeH);
+                badge.setAttribute('rx', '5');
+                badge.setAttribute('fill', 'rgba(251,191,36,0.2)');
+                badge.setAttribute('stroke', '#fbbf24');
+                badge.setAttribute('stroke-width', '0.8');
+                svg.appendChild(badge);
+
+                const badgeTxt = document.createElementNS(ns, 'text');
+                badgeTxt.setAttribute('x', SVG_W - badgeW / 2 - 8);
+                badgeTxt.setAttribute('y', y + 12);
+                badgeTxt.setAttribute('text-anchor', 'middle');
+                badgeTxt.setAttribute('fill', '#fbbf24');
+                badgeTxt.setAttribute('font-size', '7.5');
+                badgeTxt.setAttribute('font-family', "'Inter', sans-serif");
+                badgeTxt.textContent = '↺ retry';
+                svg.appendChild(badgeTxt);
+            }
+
+            // ── Connector arrow down (between nodes) ──
+            if (i < this.nodes.length - 1) {
+                const arrowX = NODE_X + STEP_R;  // align under step circle
+                const ay1 = y + NODE_H;
+                const ay2 = y + NODE_H + ARROW_H;
+                const clr = isActive ? '#34d399' : '#7c3aed';
+
+                const line = document.createElementNS(ns, 'line');
+                line.setAttribute('x1', arrowX);
+                line.setAttribute('y1', ay1 + 3);
+                line.setAttribute('x2', arrowX);
+                line.setAttribute('y2', ay2 - 4);
+                line.setAttribute('stroke', clr);
+                line.setAttribute('stroke-width', '1.5');
+                line.setAttribute('stroke-dasharray', isActive ? '4,3' : 'none');
+                line.setAttribute('opacity', '0.75');
+                line.setAttribute('marker-end', `url(#${isActive ? 'arr-active' : 'arr-done'})`);
+                svg.appendChild(line);
+            }
+        });
+
+        // Replace old SVG
+        const oldSvg = this.container.querySelector('svg');
+        if (oldSvg) oldSvg.remove();
+        this.container.appendChild(svg);
+
+        // Auto-scroll graph to show latest node
+        requestAnimationFrame(() => {
+            this.container.scrollTop = this.container.scrollHeight;
+        });
+    }
+}
+
+
+// ─── Live Events Panel ────────────────────────────────────────────────
+async function loadLiveEvents() {
+    const grid = document.getElementById('eventsGrid');
+    if (!grid) return;
+
+    // Show loading state
+    const loadingEl = document.getElementById('eventsLoadingState');
+    if (loadingEl) loadingEl.style.display = 'block';
+    // Remove any previously rendered cards (keep loading div)
+    grid.querySelectorAll('.event-card').forEach(c => c.remove());
+
+    try {
+        const resp = await fetch('/api/events?days_ahead=120');
+        const data = await resp.json();
+
+        if (loadingEl) loadingEl.style.display = 'none';
+
+        const events = data.events || [];
+        if (events.length === 0) {
+            grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:#64748b;">No upcoming events found. Try again later.</div>`;
+            return;
+        }
+
+        // Clear and render live cards
+        grid.innerHTML = '';
+        events.slice(0, 18).forEach(evt => {
+            const card = buildEventCard(evt);
+            grid.appendChild(card);
+        });
+    } catch (err) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:#f87171;font-size:0.85rem;">⚠️ Could not load events: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function buildEventCard(evt) {
+    const div = document.createElement('div');
+    const typeMap = {
+        MOON_PHASE:      { cls: 'moon',    icon: '🌕', badge: 'Moon Phase' },
+        SPACE_EVENT:     { cls: 'eclipse', icon: '🚀', badge: 'Space Event' },
+        NEAR_EARTH_OBJECT: { cls: 'meteor', icon: '☄️', badge: 'Asteroid' },
+    };
+    const { cls, icon, badge } = typeMap[evt.event_type] || { cls: 'meteor', icon: '🌠', badge: evt.event_type || 'Event' };
+    div.className = `event-card ${cls}`;
+
+    // Format date
+    let dateStr = evt.event_time || '';
+    try {
+        const d = new Date(dateStr);
+        dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+                  (evt.event_time?.includes('T') ? ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC' : '');
+    } catch (_) {}
+
+    const details = (evt.details || evt.description || '').slice(0, 120);
+    const source = evt.source ? `<span style="color:#334155;font-size:0.68rem;">📡 ${escapeHtml(evt.source)}</span>` : '';
+
+    div.innerHTML = `
+        <div class="event-icon">${icon}</div>
+        <div class="event-details">
+            <h4>${escapeHtml(evt.event_name || evt.name || 'Unknown Event')}</h4>
+            <p class="event-date">${escapeHtml(dateStr)}</p>
+            <p class="event-desc">${escapeHtml(details)}${details.length >= 120 ? '…' : ''}</p>
+            ${source}
+        </div>
+        <span class="event-type-badge">${escapeHtml(badge)}</span>
+    `;
+    return div;
+}
+
+
+// ─── Live Dashboard Launch Card ───────────────────────────────────────
+async function loadNextLaunch() {
+    const el = document.getElementById('nextLaunchInfo');
+    if (!el) return;
+    el.innerHTML = '<p class="placeholder-text" style="color:#475569;">🚀 Loading launches...</p>';
+
+    try {
+        const resp = await fetch('/api/next-launch?limit=3');
+        const data = await resp.json();
+        const launches = data.launches || [];
+
+        if (launches.length === 0) {
+            el.innerHTML = '<p class="placeholder-text">No launches data available right now.</p>';
+            return;
+        }
+
+        el.innerHTML = launches.map((l, i) => `
+            <div style="margin-bottom:${i < launches.length-1 ? '12' : '0'}px;padding-bottom:${i < launches.length-1 ? '12' : '0'}px;border-bottom:${i < launches.length-1 ? '1px solid rgba(255,255,255,0.06)' : 'none'}">
+                <div style="font-weight:600;color:#e2e8f0;font-size:0.85rem;margin-bottom:3px;">${escapeHtml(l.name || 'Unknown Launch')}</div>
+                <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:2px;">🚀 ${escapeHtml(l.rocket || '')} &nbsp;·&nbsp; ${escapeHtml(l.provider || '')}</div>
+                <div style="font-size:0.72rem;color:#64748b;">${escapeHtml(l.pad_location || l.pad_name || '')} &nbsp;·&nbsp; ${formatLaunchTime(l.launch_time_utc)}</div>
+                <span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;font-size:0.68rem;background:rgba(124,58,237,0.2);color:#a78bfa;">${escapeHtml(l.status || 'TBD')}</span>
+            </div>
+        `).join('');
+    } catch (err) {
+        el.innerHTML = `<p class="placeholder-text" style="color:#f87171;">⚠️ ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function formatLaunchTime(utcStr) {
+    if (!utcStr) return 'TBD';
+    try {
+        const d = new Date(utcStr);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+               ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
+    } catch (_) { return utcStr; }
 }
 
 

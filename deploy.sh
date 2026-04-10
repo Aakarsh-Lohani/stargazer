@@ -28,6 +28,8 @@ gcloud builds submit --tag "${IMAGE}" .
 # Step 2: Deploy to Cloud Run
 echo ""
 echo "🚀 Deploying to Cloud Run..."
+# NOTE: If you skipped Google Calendar OAuth setup, remove these 4 secrets from --set-secrets below:
+# GOOGLE_CALENDAR_REFRESH_TOKEN, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, CALENDAR_ID
 gcloud run deploy "${SERVICE_NAME}" \
   --image="${IMAGE}" \
   --region="${REGION}" \
@@ -39,7 +41,6 @@ gcloud run deploy "${SERVICE_NAME}" \
   --timeout=300 \
   --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=1,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},MODEL=gemini-2.0-flash" \
   --set-secrets="OPENWEATHER_API_KEY=openweather-api-key:latest,MAPS_API_KEY=maps-api-key:latest,N2YO_API_KEY=n2yo-api-key:latest,NASA_API_KEY=nasa-api-key:latest,GOOGLE_CALENDAR_REFRESH_TOKEN=calendar-refresh-token:latest,GOOGLE_OAUTH_CLIENT_ID=google-oauth-client-id:latest,GOOGLE_OAUTH_CLIENT_SECRET=google-oauth-client-secret:latest,CALENDAR_ID=calendar-id:latest" \
-  # NOTE: Remove the Calendar secrets above (last 4) if you skipped Calendar OAuth setup.
   --labels="project=stargazer"
 
 # Step 3: Get the deployed URL
