@@ -609,9 +609,24 @@ function appendMessage(role, content) {
     scrollToBottom();
 }
 
+// ─── Date Formatter ────────────────────────────────────────────────────
+// Converts ISO 8601 strings like 2026-04-11T00:06:00Z to readable text
+function formatISODate(isoStr) {
+    try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const date = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+        const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+        return `${date} at ${time} UTC`;
+    } catch (_) { return isoStr; }
+}
+
 function formatContent(text) {
     if (!text) return '';
     let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    
+    // ── Auto-format raw ISO dates ──
+    html = html.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g, (match) => formatISODate(match));
     
     // ── Parse :::reasoning blocks ──
     html = html.replace(/:::reasoning\s*([\s\S]*?):::/g, (match, p1) => {
@@ -908,8 +923,10 @@ class FlowGraph {
             const isActive = block.status === 'active';
             const tooltip  = this._buildAgentTooltip(block);
             const retryBadge = block.isRetry
-                ? `<span class="fg-retry-badge">↺ retry</span>` : '';
-            const statusIcon = isActive ? '●' : '✓';
+                ? `<span class="fg-retry-badge">RETRY</span>` : '';
+            const statusText = isActive ? 'Running' : 'Done';
+            const toolCount  = block.tools.length;
+            const blockId    = `fg-block-${idx}`;
 
             html += `
             <div class="fg-agent-block ${isActive ? 'active' : 'completed'} ${tooltip ? 'has-tooltip' : ''}"
@@ -917,21 +934,22 @@ class FlowGraph {
                  data-tooltip="${escapeHtml(tooltip)}">
                 <div class="fg-agent-header">
                     <div class="fg-step-badge" style="background:${cfg.border};">${block.step}</div>
-                    <span class="fg-agent-icon">${cfg.emoji}</span>
                     <span class="fg-agent-name" style="color:${cfg.text};">${cfg.label}</span>
                     ${retryBadge}
-                    <span class="fg-status-icon" style="color:${isActive ? '#34d399' : cfg.border};">${statusIcon}</span>
+                    ${toolCount > 0 ? `<button class="fg-expand-btn" onclick="this.closest('.fg-agent-block').classList.toggle('fg-expanded');this.textContent=this.closest('.fg-agent-block').classList.contains('fg-expanded')?'Hide':'${toolCount} tools'" data-count="${toolCount}">${toolCount} tools</button>` : ''}
+                    <span class="fg-status-chip ${isActive ? 'running' : 'done'}">${statusText}</span>
                 </div>`;
 
-            if (block.tools.length > 0) {
-                html += `<div class="fg-tools">`;
+            if (toolCount > 0) {
+                html += `<div class="fg-tools-list">`;
                 block.tools.forEach(t => {
                     const toolTip = t.result
-                        ? `Output: ${t.result.slice(0, 350)}` + (t.result.length > 350 ? '…' : '')
+                        ? `Output: ${t.result.slice(0, 350)}${t.result.length > 350 ? '…' : ''}`
                         : `Args: ${JSON.stringify(t.args).slice(0, 300)}`;
+                    const doneIcon = t.status === 'done' ? '✓' : '◌';
                     html += `
                     <div class="fg-tool ${t.status}" data-tooltip="${escapeHtml(toolTip)}">
-                        <span>${t.status === 'done' ? '✓' : '⧗'}</span>
+                        <span class="fg-tool-status">${doneIcon}</span>
                         <span class="fg-tool-name">${escapeHtml(t.name)}</span>
                         <span class="fg-tool-step">#${t.step}</span>
                     </div>`;
@@ -941,16 +959,17 @@ class FlowGraph {
 
             html += `</div>`;
 
-            // Connector arrow between blocks
+            // Connector between blocks
             if (idx < this.blocks.length - 1) {
                 const nextBlock = this.blocks[idx + 1];
                 const isLoop = nextBlock.isRetry;
-                const reason  = (block.transferReason || '').slice(0, 80);
+                const reason  = (block.transferReason || '').slice(0, 70);
+                const loopClass = isLoop ? 'loop' : '';
                 html += `
-                <div class="fg-connector ${isLoop ? 'loop' : ''}">
+                <div class="fg-connector ${loopClass}">
                     <div class="fg-connector-line"></div>
-                    ${reason ? `<div class="fg-connector-label" data-tooltip="${escapeHtml(block.transferReason || '')}">💭 ${escapeHtml(reason)}${(block.transferReason||'').length > 80 ? '…' : ''}</div>` : ''}
-                    <div class="fg-connector-arrow">${isLoop ? '➺' : '▼'}</div>
+                    ${reason ? `<div class="fg-connector-label" data-tooltip="${escapeHtml(block.transferReason || '')}">${escapeHtml(reason)}${(block.transferReason||'').length > 70 ? '…' : ''}</div>` : ''}
+                    <div class="fg-connector-arrow">${isLoop ? '↻' : '↓'}</div>
                 </div>`;
             }
         });

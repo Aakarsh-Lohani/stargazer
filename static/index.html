@@ -235,35 +235,62 @@
             background: rgba(251,191,36,0.15);
             border: 0.8px solid #fbbf24;
             color: #fbbf24;
-            font-size: 0.6rem;
-            padding: 1px 5px;
+            font-size: 0.55rem;
+            padding: 1px 4px;
             border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: bold;
+        }
+        .fg-status-chip {
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+        .fg-status-chip.running { background: rgba(52,211,153,0.15); color: #34d399; }
+        .fg-status-chip.done { background: rgba(148,163,184,0.1); color: #64748b; }
+        
+        .fg-expand-btn {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #cbd5e1;
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
             font-family: 'Inter', sans-serif;
         }
-        .fg-status-icon { font-size: 0.72rem; }
-        .fg-agent-block.active .fg-status-icon { animation: blink-status 1s infinite; }
-        @keyframes blink-status { 0%,100%{opacity:1} 50%{opacity:0.2} }
-        .fg-tools {
+        .fg-expand-btn:hover { background: rgba(255,255,255,0.15); }
+        
+        .fg-tools-list {
+            display: none;
             border-top: 1px solid rgba(255,255,255,0.06);
-            padding: 3px 6px 4px 8px;
+            padding: 4px 6px;
+            background: rgba(0,0,0,0.15);
         }
+        .fg-agent-block.fg-expanded .fg-tools-list { display: block; }
+        
         .fg-tool {
             display: flex;
             align-items: center;
-            gap: 4px;
-            padding: 2px 4px;
+            gap: 6px;
+            padding: 3px 6px;
             border-radius: 4px;
-            font-size: 0.67rem;
-            color: #475569;
+            font-size: 0.68rem;
+            color: #94a3b8;
             cursor: help;
             transition: background 0.15s;
             font-family: 'JetBrains Mono', monospace;
         }
-        .fg-tool:hover { background: rgba(255,255,255,0.04); color: #94a3b8; }
-        .fg-tool.done { color: #4ade80; }
-        .fg-tool.done:hover { color: #86efac; }
-        .fg-tool.running { color: #fbbf24; }
-        .fg-tool-step { color: #334155; font-size: 0.62rem; margin-left: auto; }
+        .fg-tool:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
+        .fg-tool-status { color: #475569; font-size: 0.75rem; }
+        .fg-tool.done .fg-tool-status { color: #34d399; }
+        .fg-tool.running .fg-tool-status { color: #fbbf24; }
+        .fg-tool-step { color: #475569; font-size: 0.6rem; margin-left: auto; }
         .fg-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
         .fg-connector {
             display: flex;
