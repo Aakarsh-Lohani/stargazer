@@ -9,6 +9,11 @@ from google.adk.tools.tool_context import ToolContext
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCLOUD_PROJECT") or os.getenv("GCP_PROJECT")
 DATASET = "stargazer_db"
 
+def _bq_ts():
+    """Return a BigQuery-safe UTC timestamp string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 # Auto-detect project on Cloud Run if env var not set
 if not PROJECT_ID:
     try:
@@ -71,7 +76,7 @@ def log_event_to_bq(
             "location": location,
             "weather_status": weather_status,
             "calendar_event_id": calendar_event_id,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": _bq_ts()
         }]
 
         table_id = f"{PROJECT_ID}.{DATASET}.event_log"
@@ -118,7 +123,7 @@ def log_pipeline_event_to_bq(
             "tool_args": json.dumps(tool_args or {}),
             "tool_result_preview": tool_result_preview[:500],
             "thinking_text": thinking_text[:500],
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": _bq_ts()
         }
 
         table_id = f"{PROJECT_ID}.{DATASET}.pipeline_log"
@@ -173,7 +178,7 @@ def cache_space_events_to_bq(
         if client is None:
             return {"status": "skipped", "reason": "BigQuery client not available"}
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = _bq_ts()
         rows = []
         for e in events:
             rows.append({

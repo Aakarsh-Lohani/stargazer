@@ -193,6 +193,176 @@
             50% { opacity: 0.4; }
         }
 
+        /* ─── Agent Flow Graph (right panel) ──────────────── */
+        .fg-container { padding: 4px 0; }
+        .fg-agent-block {
+            border: 1.5px solid var(--agent-color, #475569);
+            border-radius: 10px;
+            background: var(--agent-bg, #1e293b);
+            margin: 3px 0;
+            overflow: hidden;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .fg-agent-block.active {
+            border-color: #34d399 !important;
+            box-shadow: 0 0 8px rgba(52,211,153,0.2);
+        }
+        .fg-agent-block.has-tooltip { cursor: help; }
+        .fg-agent-block:hover { opacity: 0.92; }
+        .fg-agent-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            font-size: 0.76rem;
+            color: var(--agent-text, #94a3b8);
+            font-family: 'Inter', sans-serif;
+        }
+        .fg-step-badge {
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: var(--agent-color, #475569);
+            color: white;
+            font-size: 9px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .fg-agent-icon { font-size: 13px; line-height: 1; }
+        .fg-agent-name { font-weight: 600; flex: 1; font-size: 0.76rem; }
+        .fg-retry-badge {
+            background: rgba(251,191,36,0.15);
+            border: 0.8px solid #fbbf24;
+            color: #fbbf24;
+            font-size: 0.6rem;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-family: 'Inter', sans-serif;
+        }
+        .fg-status-icon { font-size: 0.72rem; }
+        .fg-agent-block.active .fg-status-icon { animation: blink-status 1s infinite; }
+        @keyframes blink-status { 0%,100%{opacity:1} 50%{opacity:0.2} }
+        .fg-tools {
+            border-top: 1px solid rgba(255,255,255,0.06);
+            padding: 3px 6px 4px 8px;
+        }
+        .fg-tool {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-size: 0.67rem;
+            color: #475569;
+            cursor: help;
+            transition: background 0.15s;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .fg-tool:hover { background: rgba(255,255,255,0.04); color: #94a3b8; }
+        .fg-tool.done { color: #4ade80; }
+        .fg-tool.done:hover { color: #86efac; }
+        .fg-tool.running { color: #fbbf24; }
+        .fg-tool-step { color: #334155; font-size: 0.62rem; margin-left: auto; }
+        .fg-tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+        .fg-connector {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1px;
+            padding: 1px 0;
+            position: relative;
+        }
+        .fg-connector-line {
+            width: 1.5px;
+            height: 8px;
+            background: rgba(124,58,237,0.35);
+        }
+        .fg-connector.loop .fg-connector-line { background: rgba(251,191,36,0.5); }
+        .fg-connector-label {
+            font-size: 0.62rem;
+            color: #475569;
+            max-width: 220px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: help;
+            padding: 1px 5px;
+            border-radius: 3px;
+            border: 0.8px solid rgba(124,58,237,0.18);
+            font-family: 'Inter', sans-serif;
+            transition: color 0.15s;
+        }
+        .fg-connector-label:hover { color: #a78bfa; }
+        .fg-connector.loop .fg-connector-label { color: #92400e; border-color: rgba(251,191,36,0.3); }
+        .fg-connector-arrow { color: #334155; font-size: 9px; }
+        .fg-connector.loop .fg-connector-arrow { color: #d97706; }
+        .fg-tooltip {
+            position: fixed;
+            background: rgba(5, 5, 20, 0.97);
+            border: 1px solid rgba(124,58,237,0.45);
+            border-radius: 8px;
+            padding: 9px 13px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.72rem;
+            line-height: 1.65;
+            max-width: 320px;
+            z-index: 9999;
+            pointer-events: none;
+            display: none;
+            color: #94a3b8;
+            word-break: break-word;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+        }
+        .fg-tooltip strong { color: #a78bfa; display: block; margin-bottom: 3px; font-size: 0.75rem; }
+        /* ─── Box directives ─────────────────────────────────── */
+        .reasoning-panel {
+            background: rgba(124,58,237,0.08);
+            border: 1px solid rgba(124,58,237,0.25);
+            border-radius: 8px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+        .reasoning-header {
+            background: rgba(124,58,237,0.15);
+            padding: 5px 10px;
+            font-size: 0.72rem;
+            color: #a78bfa;
+            font-weight: 600;
+        }
+        .reasoning-content {
+            padding: 8px 10px;
+            color: #94a3b8;
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+        .info-box {
+            border-radius: 10px;
+            margin: 8px 0;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .box-content {
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            line-height: 1.7;
+            color: #cbd5e1;
+        }
+        .box-recommended { background: linear-gradient(135deg, rgba(5,150,105,0.12), rgba(4,120,87,0.08)); border-color: rgba(52,211,153,0.35); }
+        .box-recommended .box-content::before { content: '⭐ RECOMMENDED'; display: block; font-size: 0.65rem; color: #34d399; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 6px; }
+        .box-info { background: rgba(30,58,138,0.12); border-color: rgba(96,165,250,0.25); }
+        .box-info .box-content::before { content: 'ℹ️ INFO'; display: block; font-size: 0.65rem; color: #60a5fa; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 6px; }
+        .box-weather { background: rgba(6,78,59,0.12); border-color: rgba(52,211,153,0.3); }
+        .box-weather .box-content::before { content: '🌤️ WEATHER'; display: block; font-size: 0.65rem; color: #6ee7b7; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 6px; }
+        .box-launches { background: rgba(124,58,237,0.08); border-color: rgba(167,139,250,0.25); }
+        .box-launches .box-content::before { content: '🚀 LAUNCHES'; display: block; font-size: 0.65rem; color: #a78bfa; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 6px; }
+        .box-events { background: rgba(30,27,75,0.18); border-color: rgba(129,140,248,0.3); }
+        .box-events .box-content::before { content: '🌠 EVENTS'; display: block; font-size: 0.65rem; color: #818cf8; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 6px; }
+        .go-status { font-weight: 700; padding: 1px 6px; border-radius: 4px; font-size: 0.8em; }
+        .go-status.go { background: rgba(52,211,153,0.15); color: #34d399; border: 1px solid rgba(52,211,153,0.3); }
+        .go-status.nogo { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+        .go-status.marginal { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+
         /* Responsive */
         @media (max-width: 900px) {
             .insights-panel { width: 260px; min-width: 220px; }
@@ -259,16 +429,18 @@
                 </div>
             </div>
 
-            <div class="sidebar-agent-flow" style="margin-bottom: auto; background: rgba(10, 10, 30, 0.5); border: 1px solid rgba(100, 120, 255, 0.1); border-radius: 12px; padding: 12px 8px; overflow: hidden;">
-                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 8px; text-align: center;">Live Pipeline</div>
-                <!-- Dynamic directed graph — built by PipelineGraph class in app.js -->
-                <div id="pipelineGraphSvg"
-                     style="width:100%;overflow-x:hidden;overflow-y:auto;max-height:320px;display:flex;justify-content:center;">
-                    <!-- Empty state -->
-                    <div id="pipelineEmpty" style="text-align:center;padding:24px 8px;color:#334155;font-size:0.72rem;font-family:'Inter',sans-serif;">
-                        <div style="font-size:1.6rem;margin-bottom:8px;">🔭</div>
-                        Send a message to see the live agent pipeline graph here.
-                    </div>
+            <div class="sidebar-agent-flow" style="margin-bottom: auto; background: rgba(10, 10, 30, 0.5); border: 1px solid rgba(100, 120, 255, 0.1); border-radius: 12px; padding: 16px 10px;">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 12px; text-align: center;">Pipeline Flow</div>
+                <div class="flow-container" style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                    <div class="flow-node" data-agent="stargazer_greeter" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🌌 Greeter</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="stargazer_workflow" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">⚙️ Orchestrator</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="orbital_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🛰️ Orbital</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="weather_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🌤️ Weather</div>
+                    <div class="flow-arrow" style="height: 16px; border-left: 2px dashed rgba(124,58,237,0.3); transition: all 0.3s;"></div>
+                    <div class="flow-node" data-agent="logistics_agent" style="padding: 6px 16px; border: 1px solid rgba(124,58,237,0.3); border-radius: 20px; font-size: 0.75rem; color: #94a3b8; transition: all 0.3s; background: rgba(10,10,30,0.8);">🗺️ Logistics</div>
                 </div>
             </div>
 
@@ -367,6 +539,7 @@
                         <div class="insights-tabs">
                             <button class="insights-tab active" data-tab="trace">Pipeline Trace</button>
                             <button class="insights-tab" data-tab="bqlog">BQ Log</button>
+                            <button class="insights-tab" data-tab="flow">🔀 Agent Flow</button>
                         </div>
                         <div class="insights-body">
                             <!-- Pipeline Trace tab -->
@@ -384,6 +557,15 @@
                                     Pipeline events logged to BigQuery will appear here.
                                 </div>
                                 <div id="bqContent"></div>
+                            </div>
+                            <!-- Agent Flow tab -->
+                            <div class="insights-tab-content" id="flowTab">
+                                <div class="insights-empty" id="flowEmpty">
+                                    <span>🔀</span>
+                                    Send a message to see the full agent execution flow graph here.
+                                    <br><br><small style="color:#1e293b;">Hover any node to see reasoning or tool output.</small>
+                                </div>
+                                <div class="fg-container" id="flowGraphContent"></div>
                             </div>
                         </div>
                     </div>
@@ -487,6 +669,9 @@
 
     <!-- Mobile Menu Toggle -->
     <button class="mobile-menu-btn" id="mobileMenuBtn">☰</button>
+
+    <!-- Global Agent Flow tooltip (position:fixed, JS-controlled) -->
+    <div id="flowTooltip" class="fg-tooltip"></div>
 
     <script src="/static/app.js"></script>
 </body>

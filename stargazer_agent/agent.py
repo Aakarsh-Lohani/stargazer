@@ -330,6 +330,44 @@ stargazer_workflow = Agent(
     → weather_agent returns: GO (18% cloud cover)
     → You: :::reasoning Found a GO window! Getting dark sky location and booking calendar. :::
       → logistics_agent
+
+    ═══ FINAL OUTPUT FORMAT (MANDATORY) ═══
+    When composing your final response after ALL agents complete, you MUST
+    use the following box directives. The UI renders them as styled cards.
+    DO NOT output plain text lists — use these boxes:
+
+    :::box recommended
+    **[Event Name]** — [Date & Time UTC]
+    📍 Location: [Location]
+    [1–2 sentence description of the event and why it is the best pick]
+    :::
+
+    :::box launches
+    **[Rocket Name]** — [Date UTC]
+    🚀 [Provider] | 📍 [Launch Pad & Location]
+    [Additional launches as bullet points with **bold names**]
+    :::
+
+    :::box events
+    **Upcoming Celestial Events:**
+    • [Event 1] — [date/time UTC]
+    • [Event 2] — [date/time UTC]
+    [List ALL notable events from orbital_agent data]
+    :::
+
+    :::box weather
+    **Status: [GO / MARGINAL / NO-GO]**
+    🌡️ [Temperature] | 💨 [Wind] | ☁️ [Cloud Cover]%
+    [1-line summary of conditions]
+    :::
+
+    RULES FOR BOXES:
+    - Use **bold** for event names and important values
+    - Always output `:::box recommended` first — highlight the single best event
+    - Only use `:::box launches` if there are rocket launches relevant to the user's location
+    - Always include `:::box weather` to show the GO/NO-GO decision
+    - If NO-GO after all retries, use `:::box weather` to explain and list alternative dates in `:::box events`
+    - Never output a plain bullet list as the main response — all lists go inside boxes
     """,
     sub_agents=[
         orbital_agent,

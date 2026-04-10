@@ -10,7 +10,9 @@ const state = {
     activePanel: 'chat',
     insightsVisible: true,
     currentTraceSession: null,
-    pipelineGraph: null,   // PipelineGraph instance
+    pipelineGraph: null,    // PipelineGraph (sidebar SVG) — kept for compatibility
+    flowGraph: null,        // FlowGraph (right panel Agent Flow tab)
+    _pendingReason: '',     // Reasoning text buffered before next agent switch
 };
 
 // ─── DOM ─────────────────────────────────────────────────────────────
@@ -119,6 +121,7 @@ function initInsightsPanel() {
     const TAB_CONTENT = {
         trace: document.getElementById('traceTab'),
         bqlog: document.getElementById('bqlogTab'),
+        flow:  document.getElementById('flowTab'),
     };
 
     document.querySelectorAll('.insights-tab').forEach(tab => {
@@ -322,8 +325,10 @@ async function sendMessage(message) {
     // Show "thinking" in chat as a minimal status indicator
     const thinkingEl = showThinkingBar();
     setSendBtnLoading(true);
-    // Reset pipeline graph for new conversation turn
+    // Reset both graphs for new conversation turn
     if (state.pipelineGraph) state.pipelineGraph.reset();
+    if (state.flowGraph) state.flowGraph.reset();
+    state._pendingReason = '';
 
     try {
         const resp = await fetch('/api/stream', {
@@ -376,8 +381,10 @@ async function sendMessage(message) {
             parseResponseForDashboard(finalResponse);
             appendTraceEntry(`${tsLabel()}<span style="color:#34d399;font-weight:600">✓ Final response delivered</span>`);
             
-            // Mark last node completed in pipeline graph
+            // Mark both graphs complete
             if (state.pipelineGraph) state.pipelineGraph.markCompleted();
+            if (state.flowGraph) state.flowGraph.markComplete();
+            updateAgentFlowUI('completed_all');
         } else {
             addProgressLine(thinkingEl, `<span style="color:#fbbf24">⚠️ No response received</span>`);
             updateThinkingBar(thinkingEl, '⚠️ No Response');
@@ -447,8 +454,11 @@ function processStreamEvent(evt, thinkingEl) {
         const label = AGENT_LABELS[evt.agent] || `${icon} ${evt.agent} activated`;
         addProgressLine(thinkingEl, `<span style="color:#a78bfa">${icon} ${label}</span>`);
 
-        // Feed agent switch into the live dynamic pipeline graph
-        if (state.pipelineGraph) state.pipelineGraph.addNode(evt.agent);
+        // Update static sidebar flow
+        updateAgentFlowUI(evt.agent);
+        // Feed agent switch into the live FlowGraph (right panel Agent Flow tab)
+        if (state.flowGraph) state.flowGraph.onAgentSwitch(evt.agent, state._pendingReason);
+        state._pendingReason = '';
     }
 
     // ── Agent transfer ──
@@ -458,6 +468,8 @@ function processStreamEvent(evt, thinkingEl) {
         updateThinkingBar(thinkingEl, `↗️ → ${evt.to_agent}`);
         appendTraceEntry(`${tsLabel()}<span style="color:#f59e0b">↗️ <strong>Transfer:</strong> ${fromIcon} ${escapeHtml(evt.from_agent)} → ${toIcon} ${escapeHtml(evt.to_agent)}</span>`);
         addProgressLine(thinkingEl, `<span style="color:#f59e0b">↗️ Handing off to ${escapeHtml(evt.to_agent)}</span>`);
+        // Store transfer reason from pending reasoning for FlowGraph connector
+        if (state.flowGraph) state.flowGraph.onTransfer(evt.from_agent, evt.to_agent, state._pendingReason);
     }
 
     // ── State update ──
@@ -477,6 +489,8 @@ function processStreamEvent(evt, thinkingEl) {
         // Chat progress — friendly tool description
         const toolLabel = TOOL_LABELS[evt.tool] || `🔧 Running ${evt.tool}`;
         addProgressLine(thinkingEl, `<span style="color:#60a5fa">${toolLabel}...</span>`);
+        // Feed to FlowGraph
+        if (state.flowGraph) state.flowGraph.onToolCall(evt.tool, evt.args || {});
     }
 
     // ── Tool result ──
@@ -489,8 +503,10 @@ function processStreamEvent(evt, thinkingEl) {
         if (evt.preview) {
             const preview = evt.preview.slice(0, 150) + (evt.preview.length > 150 ? '…' : '');
             appendTraceEntry(`${tsLabel()}<span class="trace-tool-ok">↳ ${escapeHtml(preview)}</span>`);
-            // Chat progress — summarise what was found
+            // Chat progress
             addProgressLine(thinkingEl, `<span style="color:#34d399">✓ ${escapeHtml(evt.tool)} returned data</span>`);
+            // Feed to FlowGraph
+            if (state.flowGraph) state.flowGraph.onToolResult(evt.tool, evt.preview);
         }
     }
 
@@ -498,6 +514,8 @@ function processStreamEvent(evt, thinkingEl) {
     if (evt.type === 'thinking') {
         const text = (evt.text || '').slice(0, 250);
         appendTraceEntry(`${tsLabel()}<span class="trace-think">💭 ${escapeHtml(text)}${(evt.text || '').length > 250 ? '…' : ''}</span>`);
+        // Buffer thinking text as pending reasoning for FlowGraph connector labels
+        if (text) state._pendingReason = (state._pendingReason + ' ' + text).trim().slice(0, 400);
     }
 
     // ── Streaming text ──
@@ -506,6 +524,12 @@ function processStreamEvent(evt, thinkingEl) {
             appendTraceEntry(`${tsLabel()}<span style="color:#475569">📝 Agent composing response...</span>`);
             addProgressLine(thinkingEl, `<span style="color:#34d399">📝 Composing your mission brief...</span>`);
             state._textStreamStarted = true;
+        }
+        // Extract :::reasoning blocks from text stream for FlowGraph connector labels
+        const reasoningMatch = (evt.text || '').match(/:::reasoning\s*([\s\S]*?):::/);
+        if (reasoningMatch) {
+            const reason = reasoningMatch[1].trim();
+            if (reason) state._pendingReason = reason.slice(0, 400);
         }
     }
 
@@ -589,15 +613,39 @@ function formatContent(text) {
     if (!text) return '';
     let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     
-    // Parse formatting boxes FIRST, converting newlines to <br> so they stay as solid blocks
+    // ── Parse :::reasoning blocks ──
     html = html.replace(/:::reasoning\s*([\s\S]*?):::/g, (match, p1) => {
         let content = p1.trim().replace(/\n/g, '<br>');
         return `\n\n<div class="reasoning-panel"><div class="reasoning-header">🧠 Orchestrator Reasoning</div><div class="reasoning-content">${content}</div></div>\n\n`;
     });
     
+    // ── Parse :::box TYPE ... ::: blocks ──
     html = html.replace(/:::box\s+(\w+)\s*([\s\S]*?):::/g, (match, type, content) => {
-        let cleanContent = content.trim().replace(/\n/g, '<br>');
-        return `\n\n<div class="info-box box-${type}"><div class="box-content">${cleanContent}</div></div>\n\n`;
+        let clean = content.trim();
+        // Convert bold
+        clean = clean.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        clean = clean.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        // Convert bullet lines (• or *) to <li> elements
+        const lines = clean.split('\n').map(line => {
+            const bulletMatch = line.match(/^[•\*\-]\s+(.+)/);
+            if (bulletMatch) return `<li>${bulletMatch[1]}</li>`;
+            if (line.trim() === '') return '<br>';
+            return line;
+        });
+        // Wrap consecutive <li> items in <ul>
+        let boxHtml = '';
+        let inList = false;
+        lines.forEach(line => {
+            if (line.startsWith('<li>')) {
+                if (!inList) { boxHtml += '<ul style="margin:4px 0 4px 16px;padding:0;list-style:disc;">'; inList = true; }
+                boxHtml += line;
+            } else {
+                if (inList) { boxHtml += '</ul>'; inList = false; }
+                if (line !== '<br>' || boxHtml.slice(-4) !== '<br>') boxHtml += line + '\n';
+            }
+        });
+        if (inList) boxHtml += '</ul>';
+        return `\n\n<div class="info-box box-${type}"><div class="box-content">${boxHtml.trim()}</div></div>\n\n`;
     });
 
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -608,11 +656,20 @@ function formatContent(text) {
     html = html.replace(/\bNO-GO\b/g, '<span class="go-status nogo">NO-GO</span>');
     html = html.replace(/\bMARGINAL\b/g, '<span class="go-status marginal">MARGINAL</span>');
     
+    // Convert remaining plain bullet lines to list items
+    html = html.replace(/((?:^|\n)[•\*\-] .+)+/g, (block) => {
+        const items = block.trim().split('\n').map(l => {
+            const m = l.match(/^[•\*\-]\s+(.+)/);
+            return m ? `<li>${m[1]}</li>` : l;
+        }).join('');
+        return `\n<ul style="margin:6px 0 6px 18px;padding:0;list-style:disc;color:#cbd5e1;">${items}</ul>\n`;
+    });
+
     // Split into paragraphs, preserving our custom divs
     html = html.split('\n\n').map(p => {
         let trimmed = p.trim();
         if (!trimmed) return '';
-        if (trimmed.startsWith('<div class="reasoning-panel"') || trimmed.startsWith('<div class="info-box')) {
+        if (trimmed.startsWith('<div class="reasoning-panel"') || trimmed.startsWith('<div class="info-box') || trimmed.startsWith('<ul') || trimmed.startsWith('<pre>')) {
             return trimmed;
         }
         return `<p>${trimmed.replace(/\n/g,'<br>')}</p>`;
@@ -677,254 +734,269 @@ function parseResponseForDashboard(response) {
     else if (lower.includes(' go') || lower.includes('clear sky')) updateStatus('weatherStatus', 'GO', 'active');
 }
 
-// ─── Pipeline Graph (replaces static flow diagram) ───────────────────
+// ─── Graph Initialization ───────────────────────────────────────
 function initPipelineGraph() {
-    state.pipelineGraph = new PipelineGraph('pipelineGraphSvg');
+    state.pipelineGraph = null;   // Sidebar now uses static CSS nodes via updateAgentFlowUI
+    state.flowGraph = new FlowGraph('flowGraphContent');
+
+    // Global tooltip tracking
+    const tooltip = document.getElementById('flowTooltip');
+    if (tooltip) {
+        document.addEventListener('mousemove', (e) => {
+            if (tooltip.style.display !== 'none') {
+                tooltip.style.left = (e.clientX + 15) + 'px';
+                tooltip.style.top  = Math.min(e.clientY - 10, window.innerHeight - tooltip.offsetHeight - 10) + 'px';
+            }
+        });
+    }
+
     // Wire refresh button for events panel
     const refreshBtn = document.getElementById('refreshEventsBtn');
     if (refreshBtn) refreshBtn.addEventListener('click', loadLiveEvents);
-    // Auto-load events & launch data immediately
+
+    // Auto-load events & launch data on startup
     loadLiveEvents();
     loadNextLaunch();
 }
 
 
+// ─── Static Sidebar Pipeline Flow ─────────────────────────────
+// Shows which agent is currently ACTIVE in the 4-node sidebar diagram
+function updateAgentFlowUI(activeAgentName) {
+    const nodes = document.querySelectorAll('.flow-node');
+    if (!nodes || nodes.length === 0) return;
+
+    let foundActive = false;
+    nodes.forEach(node => {
+        const agentId = node.dataset.agent;
+        if (activeAgentName === 'completed_all') {
+            node.classList.remove('active');
+            node.classList.add('completed');
+            return;
+        }
+        if (agentId === activeAgentName) {
+            node.classList.add('active');
+            node.classList.remove('completed');
+            foundActive = true;
+        } else if (!foundActive) {
+            node.classList.remove('active');
+            node.classList.add('completed');
+        } else {
+            node.classList.remove('active');
+            node.classList.remove('completed');
+        }
+    });
+
+    const arrows = document.querySelectorAll('.flow-arrow');
+    if (activeAgentName === 'completed_all') {
+        arrows.forEach(a => { a.classList.remove('active'); a.classList.add('completed'); });
+        return;
+    }
+    arrows.forEach(arrow => {
+        const prev = arrow.previousElementSibling;
+        const next = arrow.nextElementSibling;
+        if (prev && next) {
+            const prevDone = prev.classList.contains('completed') || prev.classList.contains('active');
+            const nextActive = next.classList.contains('active') || next.classList.contains('completed');
+            if (prevDone && nextActive) {
+                arrow.classList.add('active'); arrow.classList.remove('completed');
+            } else {
+                arrow.classList.remove('active'); arrow.classList.remove('completed');
+            }
+        }
+    });
+}
+
+
+// ─── FlowGraph — Right panel "Agent Flow" tab ──────────────────────
 /**
- * PipelineGraph — Real-time directed graph for the sidebar.
- * Each agent_switch event adds a numbered node. Loops are shown
- * as extra nodes (e.g., orbital → weather → orbital → weather → logistics).
- * Renders as inline SVG, updating incrementally.
+ * Builds a live directed flow graph inside the Agent Flow tab.
+ * Each SSE event (agent_switch, tool_call, tool_result, transfer) adds
+ * to the graph, showing loops/retries and tool call paths clearly.
+ * Hover any node to see the agent reasoning or tool output.
  */
-class PipelineGraph {
+class FlowGraph {
     constructor(containerId) {
         this.containerId = containerId;
         this.container = document.getElementById(containerId);
-        this.nodes = [];   // [{id, agent, step, status}]
+        this.blocks   = [];   // [{agent, step, status, tools[], thoughts[], transferTo, transferReason, isRetry}]
+        this.current  = null;
         this.stepCount = 0;
 
-        // Agent styling config
         this.AGENT_CFG = {
-            stargazer_greeter:  { bg:'#1e0835', border:'#7c3aed', text:'#c4b5fd', emoji:'🌌', label:'Mission Control' },
-            stargazer_workflow: { bg:'#1e1b4b', border:'#4f46e5', text:'#a5b4fc', emoji:'⚙️', label:'Orchestrator' },
-            orbital_agent:      { bg:'#0c4a6e', border:'#0284c7', text:'#7dd3fc', emoji:'🛰️', label:'Orbital Agent' },
-            weather_agent:      { bg:'#064e3b', border:'#059669', text:'#6ee7b7', emoji:'🌤️', label:'Weather Agent' },
-            logistics_agent:    { bg:'#451a03', border:'#d97706', text:'#fcd34d', emoji:'🗺️', label:'Logistics Agent' },
+            stargazer_greeter:  { bg:'rgba(30,8,53,0.8)',  border:'#7c3aed', text:'#c4b5fd', emoji:'🌌', label:'Mission Control' },
+            stargazer_workflow: { bg:'rgba(30,27,75,0.8)', border:'#4f46e5', text:'#a5b4fc', emoji:'⚙️',  label:'Orchestrator'   },
+            orbital_agent:      { bg:'rgba(12,74,110,0.8)',border:'#0284c7', text:'#7dd3fc', emoji:'🛰️', label:'Orbital Agent'   },
+            weather_agent:      { bg:'rgba(6,78,59,0.8)',  border:'#059669', text:'#6ee7b7', emoji:'🌤️', label:'Weather Agent'   },
+            logistics_agent:    { bg:'rgba(69,26,3,0.8)',  border:'#d97706', text:'#fcd34d', emoji:'🗺️', label:'Logistics Agent' },
         };
     }
 
     _cfg(agent) {
-        return this.AGENT_CFG[agent] || { bg:'#1e293b', border:'#64748b', text:'#94a3b8', emoji:'🤖', label: agent };
+        return this.AGENT_CFG[agent] || { bg:'rgba(30,41,59,0.8)', border:'#64748b', text:'#94a3b8', emoji:'🤖', label: agent };
     }
 
-    /** Add a new step node (called on each agent_switch SSE event). */
-    addNode(agent) {
-        // Mark the previously active node as completed
-        this.nodes.forEach(n => { if (n.status === 'active') n.status = 'completed'; });
-
+    onAgentSwitch(agent, pendingReason) {
+        if (this.current) this.current.status = 'completed';
+        const prevCount = this.blocks.filter(b => b.agent === agent).length;
         this.stepCount++;
-        const node = { id: `n${this.stepCount}`, agent, step: this.stepCount, status: 'active' };
-        this.nodes.push(node);
+        this.current = {
+            agent, step: this.stepCount, status: 'active',
+            tools: [], thoughts: [], transferTo: null,
+            transferReason: pendingReason || '',
+            isRetry: prevCount > 0
+        };
+        this.blocks.push(this.current);
         this._render();
     }
 
-    /** Mark the current active node as completed (pipeline done). */
-    markCompleted() {
-        this.nodes.forEach(n => { if (n.status === 'active') n.status = 'completed'; });
+    onThinking(text) {
+        if (this.current && text) {
+            this.current.thoughts.push(text.slice(0, 300));
+        }
+    }
+
+    onTransfer(from, to, reason) {
+        if (this.current) {
+            this.current.transferTo     = to;
+            this.current.transferReason = reason || this.current.transferReason;
+        }
+    }
+
+    onToolCall(name, args) {
+        if (!this.current) return;
+        this.stepCount++;
+        this.current.tools.push({ name, args, result: null, step: this.stepCount, status: 'running' });
         this._render();
     }
 
-    /** Clear graph for a new conversation turn. */
+    onToolResult(name, preview) {
+        if (!this.current) return;
+        for (let i = this.current.tools.length - 1; i >= 0; i--) {
+            if (this.current.tools[i].name === name) {
+                this.current.tools[i].result = preview;
+                this.current.tools[i].status = 'done';
+                break;
+            }
+        }
+        this._render();
+    }
+
+    markComplete() {
+        if (this.current) { this.current.status = 'completed'; }
+        this._render();
+    }
+
     reset() {
-        this.nodes = [];
-        this.stepCount = 0;
+        this.blocks = []; this.current = null; this.stepCount = 0;
         this._render();
     }
 
     _render() {
         if (!this.container) return;
-
-        // Show empty state
-        const emptyEl = document.getElementById('pipelineEmpty');
-        if (this.nodes.length === 0) {
-            if (emptyEl) emptyEl.style.display = 'block';
-            // Clear any old SVG
-            const oldSvg = this.container.querySelector('svg');
-            if (oldSvg) oldSvg.remove();
+        const empty = document.getElementById('flowEmpty');
+        if (this.blocks.length === 0) {
+            if (empty) empty.style.display = 'block';
+            this.container.innerHTML = '';
             return;
         }
-        if (emptyEl) emptyEl.style.display = 'none';
+        if (empty) empty.style.display = 'none';
 
-        // Layout constants
-        const SVG_W = 240;
-        const NODE_X = 20;          // left margin for step circle
-        const NODE_W = 200;         // rect width
-        const NODE_H = 50;          // rect height
-        const STEP_R = 11;          // step circle radius
-        const ARROW_H = 30;         // height of arrow connector
-        const PAD_TOP = 8;
+        let html = '';
+        this.blocks.forEach((block, idx) => {
+            const cfg      = this._cfg(block.agent);
+            const isActive = block.status === 'active';
+            const tooltip  = this._buildAgentTooltip(block);
+            const retryBadge = block.isRetry
+                ? `<span class="fg-retry-badge">↺ retry</span>` : '';
+            const statusIcon = isActive ? '●' : '✓';
 
-        const totalH = PAD_TOP + this.nodes.length * (NODE_H + ARROW_H) - ARROW_H + 12;
+            html += `
+            <div class="fg-agent-block ${isActive ? 'active' : 'completed'} ${tooltip ? 'has-tooltip' : ''}"
+                 style="--agent-color:${cfg.border};--agent-bg:${cfg.bg};--agent-text:${cfg.text};"
+                 data-tooltip="${escapeHtml(tooltip)}">
+                <div class="fg-agent-header">
+                    <div class="fg-step-badge" style="background:${cfg.border};">${block.step}</div>
+                    <span class="fg-agent-icon">${cfg.emoji}</span>
+                    <span class="fg-agent-name" style="color:${cfg.text};">${cfg.label}</span>
+                    ${retryBadge}
+                    <span class="fg-status-icon" style="color:${isActive ? '#34d399' : cfg.border};">${statusIcon}</span>
+                </div>`;
 
-        const ns = 'http://www.w3.org/2000/svg';
-        const svg = document.createElementNS(ns, 'svg');
-        svg.setAttribute('width', SVG_W);
-        svg.setAttribute('height', totalH);
-        svg.setAttribute('xmlns', ns);
-
-        // ── Arrow marker defs ──
-        const defs = document.createElementNS(ns, 'defs');
-        const mkArrow = (id, color) => {
-            const m = document.createElementNS(ns, 'marker');
-            m.setAttribute('id', id);
-            m.setAttribute('markerWidth', '8');
-            m.setAttribute('markerHeight', '8');
-            m.setAttribute('refX', '6');
-            m.setAttribute('refY', '3');
-            m.setAttribute('orient', 'auto');
-            const p = document.createElementNS(ns, 'path');
-            p.setAttribute('d', 'M0,0 L0,6 L8,3 z');
-            p.setAttribute('fill', color);
-            m.appendChild(p);
-            return m;
-        };
-        defs.appendChild(mkArrow('arr-done', '#7c3aed'));
-        defs.appendChild(mkArrow('arr-active', '#34d399'));
-        svg.appendChild(defs);
-
-        this.nodes.forEach((node, i) => {
-            const cfg = this._cfg(node.agent);
-            const isActive  = node.status === 'active';
-            const borderClr = isActive ? '#34d399' : cfg.border;
-            const y = PAD_TOP + i * (NODE_H + ARROW_H);
-
-            // ── Step circle (left of node) ──
-            const circle = document.createElementNS(ns, 'circle');
-            circle.setAttribute('cx', NODE_X + STEP_R);
-            circle.setAttribute('cy', y + NODE_H / 2);
-            circle.setAttribute('r', STEP_R);
-            circle.setAttribute('fill', isActive ? '#059669' : cfg.border);
-            circle.setAttribute('opacity', '0.95');
-            svg.appendChild(circle);
-
-            const stepNum = document.createElementNS(ns, 'text');
-            stepNum.setAttribute('x', NODE_X + STEP_R);
-            stepNum.setAttribute('y', y + NODE_H / 2 + 4);
-            stepNum.setAttribute('text-anchor', 'middle');
-            stepNum.setAttribute('fill', 'white');
-            stepNum.setAttribute('font-size', '9.5');
-            stepNum.setAttribute('font-family', "'JetBrains Mono', monospace");
-            stepNum.setAttribute('font-weight', 'bold');
-            stepNum.textContent = node.step;
-            svg.appendChild(stepNum);
-
-            // ── Node rectangle ──
-            const rectX = NODE_X + STEP_R * 2 + 6;
-            const rect = document.createElementNS(ns, 'rect');
-            rect.setAttribute('x', rectX);
-            rect.setAttribute('y', y);
-            rect.setAttribute('width', SVG_W - rectX - 6);
-            rect.setAttribute('height', NODE_H);
-            rect.setAttribute('rx', '8');
-            rect.setAttribute('fill', cfg.bg);
-            rect.setAttribute('stroke', borderClr);
-            rect.setAttribute('stroke-width', isActive ? '2' : '1.5');
-            rect.setAttribute('opacity', '0.96');
-            svg.appendChild(rect);
-
-            // Optional glow for active node
-            if (isActive) {
-                rect.setAttribute('filter', 'drop-shadow(0 0 5px rgba(52,211,153,0.45))');
+            if (block.tools.length > 0) {
+                html += `<div class="fg-tools">`;
+                block.tools.forEach(t => {
+                    const toolTip = t.result
+                        ? `Output: ${t.result.slice(0, 350)}` + (t.result.length > 350 ? '…' : '')
+                        : `Args: ${JSON.stringify(t.args).slice(0, 300)}`;
+                    html += `
+                    <div class="fg-tool ${t.status}" data-tooltip="${escapeHtml(toolTip)}">
+                        <span>${t.status === 'done' ? '✓' : '⧗'}</span>
+                        <span class="fg-tool-name">${escapeHtml(t.name)}</span>
+                        <span class="fg-tool-step">#${t.step}</span>
+                    </div>`;
+                });
+                html += `</div>`;
             }
 
-            // ── Emoji ──
-            const emojiX = rectX + 10;
-            const emojiEl = document.createElementNS(ns, 'text');
-            emojiEl.setAttribute('x', emojiX);
-            emojiEl.setAttribute('y', y + 20);
-            emojiEl.setAttribute('font-size', '13');
-            emojiEl.textContent = cfg.emoji;
-            svg.appendChild(emojiEl);
+            html += `</div>`;
 
-            // ── Agent label ──
-            const labelEl = document.createElementNS(ns, 'text');
-            labelEl.setAttribute('x', emojiX + 20);
-            labelEl.setAttribute('y', y + 19);
-            labelEl.setAttribute('fill', cfg.text);
-            labelEl.setAttribute('font-size', '9.5');
-            labelEl.setAttribute('font-family', "'Inter', sans-serif");
-            labelEl.setAttribute('font-weight', '600');
-            labelEl.textContent = cfg.label;
-            svg.appendChild(labelEl);
-
-            // ── Status text ──
-            const statusEl = document.createElementNS(ns, 'text');
-            statusEl.setAttribute('x', emojiX + 20);
-            statusEl.setAttribute('y', y + 33);
-            statusEl.setAttribute('fill', isActive ? '#34d399' : cfg.text);
-            statusEl.setAttribute('font-size', '8');
-            statusEl.setAttribute('font-family', "'Inter', sans-serif");
-            statusEl.setAttribute('opacity', '0.8');
-            statusEl.textContent = isActive ? '● Running' : '✓ Done';
-            svg.appendChild(statusEl);
-
-            // ── Retry badge (shown when same agent appears more than once) ──
-            let prevSameIdx = -1;
-            for (let j = i - 1; j >= 0; j--) { if (this.nodes[j].agent === node.agent) { prevSameIdx = j; break; } }
-            if (prevSameIdx >= 0) {
-                const badge = document.createElementNS(ns, 'rect');
-                const badgeW = 38, badgeH = 13;
-                badge.setAttribute('x', SVG_W - badgeW - 8);
-                badge.setAttribute('y', y + 3);
-                badge.setAttribute('width', badgeW);
-                badge.setAttribute('height', badgeH);
-                badge.setAttribute('rx', '5');
-                badge.setAttribute('fill', 'rgba(251,191,36,0.2)');
-                badge.setAttribute('stroke', '#fbbf24');
-                badge.setAttribute('stroke-width', '0.8');
-                svg.appendChild(badge);
-
-                const badgeTxt = document.createElementNS(ns, 'text');
-                badgeTxt.setAttribute('x', SVG_W - badgeW / 2 - 8);
-                badgeTxt.setAttribute('y', y + 12);
-                badgeTxt.setAttribute('text-anchor', 'middle');
-                badgeTxt.setAttribute('fill', '#fbbf24');
-                badgeTxt.setAttribute('font-size', '7.5');
-                badgeTxt.setAttribute('font-family', "'Inter', sans-serif");
-                badgeTxt.textContent = '↺ retry';
-                svg.appendChild(badgeTxt);
-            }
-
-            // ── Connector arrow down (between nodes) ──
-            if (i < this.nodes.length - 1) {
-                const arrowX = NODE_X + STEP_R;  // align under step circle
-                const ay1 = y + NODE_H;
-                const ay2 = y + NODE_H + ARROW_H;
-                const clr = isActive ? '#34d399' : '#7c3aed';
-
-                const line = document.createElementNS(ns, 'line');
-                line.setAttribute('x1', arrowX);
-                line.setAttribute('y1', ay1 + 3);
-                line.setAttribute('x2', arrowX);
-                line.setAttribute('y2', ay2 - 4);
-                line.setAttribute('stroke', clr);
-                line.setAttribute('stroke-width', '1.5');
-                line.setAttribute('stroke-dasharray', isActive ? '4,3' : 'none');
-                line.setAttribute('opacity', '0.75');
-                line.setAttribute('marker-end', `url(#${isActive ? 'arr-active' : 'arr-done'})`);
-                svg.appendChild(line);
+            // Connector arrow between blocks
+            if (idx < this.blocks.length - 1) {
+                const nextBlock = this.blocks[idx + 1];
+                const isLoop = nextBlock.isRetry;
+                const reason  = (block.transferReason || '').slice(0, 80);
+                html += `
+                <div class="fg-connector ${isLoop ? 'loop' : ''}">
+                    <div class="fg-connector-line"></div>
+                    ${reason ? `<div class="fg-connector-label" data-tooltip="${escapeHtml(block.transferReason || '')}">💭 ${escapeHtml(reason)}${(block.transferReason||'').length > 80 ? '…' : ''}</div>` : ''}
+                    <div class="fg-connector-arrow">${isLoop ? '➺' : '▼'}</div>
+                </div>`;
             }
         });
 
-        // Replace old SVG
-        const oldSvg = this.container.querySelector('svg');
-        if (oldSvg) oldSvg.remove();
-        this.container.appendChild(svg);
+        this.container.innerHTML = html;
+        this._attachTooltips();
 
-        // Auto-scroll graph to show latest node
+        // Scroll to latest
         requestAnimationFrame(() => {
-            this.container.scrollTop = this.container.scrollHeight;
+            const body = this.container.closest('.insights-body');
+            if (body) body.scrollTop = body.scrollHeight;
         });
     }
+
+    _buildAgentTooltip(block) {
+        const thoughts = block.thoughts.join(' ').trim();
+        const reason   = (block.transferReason || '').trim();
+        let tip = '';
+        if (reason) tip += `Reason: ${reason}\n`;
+        if (thoughts) tip += `Thinking: ${thoughts.slice(0, 280)}${thoughts.length > 280 ? '…' : ''}`;
+        return tip.trim();
+    }
+
+    _attachTooltips() {
+        const tooltip = document.getElementById('flowTooltip');
+        if (!tooltip) return;
+        this.container.querySelectorAll('[data-tooltip]').forEach(el => {
+            const tip = el.dataset.tooltip;
+            if (!tip) return;
+            el.addEventListener('mouseenter', (e) => {
+                tooltip.innerHTML = `<strong>${escapeHtml(el.querySelector('.fg-agent-name, .fg-tool-name')?.textContent || '')}</strong>${escapeHtml(tip).replace(/\n/g, '<br>')}`;
+                tooltip.style.display = 'block';
+                tooltip.style.left = (e.clientX + 15) + 'px';
+                tooltip.style.top  = (e.clientY - 10) + 'px';
+            });
+            el.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+        });
+    }
+}
+
+// Keep PipelineGraph class stub so no reference errors (sidebar no longer uses SVG)
+class PipelineGraph {
+    constructor() { this.nodes = []; this.stepCount = 0; }
+    addNode() {}
+    markCompleted() {}
+    reset() {}
 }
 
 
